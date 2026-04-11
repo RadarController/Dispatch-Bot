@@ -30,7 +30,7 @@ for (const file of fs.readdirSync(commandsPath).filter((name) => name.endsWith('
 const readyHandler = require('./events/ready');
 const interactionCreateHandler = require('./events/interactionCreate');
 
-client.once('ready', () => {
+client.once('clientReady', () => {
   readyHandler(client).catch((error) => {
     console.error('Ready handler failed:', error);
   });
