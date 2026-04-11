@@ -1,3 +1,4 @@
+const { startLiveMonitor } = require('../liveService');
 const { ensureRolePanel } = require('../rolesPanel');
 const { REST, Routes } = require('discord.js');
 const { config } = require('../config');
@@ -29,5 +30,11 @@ module.exports = async (client) => {
     }
   } catch (error) {
     console.error('Failed to ensure role panel:', error);
+  }
+
+  try {
+    await startLiveMonitor(client);
+  } catch (error) {
+    console.error('Failed to start live monitor:', error);
   }
 };
