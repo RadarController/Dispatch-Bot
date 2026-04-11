@@ -1,3 +1,4 @@
+const { ensureRolePanel } = require('../rolesPanel');
 const { REST, Routes } = require('discord.js');
 const { config } = require('../config');
 
@@ -19,5 +20,14 @@ module.exports = async (client) => {
     console.log(`Registered ${client.commands.size} guild command(s) for ${config.discordGuildId}`);
   } catch (error) {
     console.error('Failed to register guild commands:', error);
+  }
+
+  try {
+    const panelMessage = await ensureRolePanel(client);
+    if (panelMessage) {
+      console.log(`Ensured role panel in channel ${panelMessage.channelId}`);
+    }
+  } catch (error) {
+    console.error('Failed to ensure role panel:', error);
   }
 };

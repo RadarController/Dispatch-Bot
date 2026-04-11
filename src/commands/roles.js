@@ -2,28 +2,13 @@ const {
   SlashCommandBuilder,
   PermissionFlagsBits
 } = require('discord.js');
-
-function getConfiguredRoleIds() {
-  return new Set(
-    (process.env.SELF_ASSIGNABLE_ROLE_IDS || '')
-      .split(',')
-      .map((value) => value.trim())
-      .filter(Boolean)
-  );
-}
-
-function formatRoleList(roleIds, guild) {
-  const items = [];
-
-  for (const roleId of roleIds) {
-    const role = guild.roles.cache.get(roleId);
-    if (role) {
-      items.push(`${role} (${role.name})`);
-    }
-  }
-
-  return items;
-}
+const {
+  ensureRolePanel,
+  formatRoleMentions,
+  getConfiguredRoleIds,
+  getConfiguredRoles,
+  getRolePanelChannelId
+} = require('../rolesPanel');
 
 async function getGuildMember(interaction) {
   return interaction.guild.members.fetch(interaction.user.id);
@@ -75,12 +60,17 @@ module.exports = {
             .setDescription('Role to toggle')
             .setRequired(true)
         )
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName('panel')
+        .setDescription('Create or refresh the managed role panel in the configured channel.')
     ),
 
   async execute(interaction) {
     const configuredRoleIds = getConfiguredRoleIds();
 
-    if (configuredRoleIds.size === 0) {
+    if (configuredRoleIds.length === 0) {
       await interaction.reply({
         content: 'No self-assignable roles are configured yet. Add SELF_ASSIGNABLE_ROLE_IDS in Railway first.',
         ephemeral: true
@@ -90,12 +80,48 @@ module.exports = {
 
     const subcommand = interaction.options.getSubcommand();
 
-    if (subcommand === 'list') {
-      const roleItems = formatRoleList(configuredRoleIds, interaction.guild);
+    if (subcommand === 'panel') {
+      if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageRoles)) {
+        await interaction.reply({
+          content: 'You need the Manage Roles permission to refresh the role panel.',
+          ephemeral: true
+        });
+        return;
+      }
+
+      const channelId = getRolePanelChannelId();
+      if (!channelId) {
+        await interaction.reply({
+          content: 'ROLE_PANEL_CHANNEL_ID is not configured yet in Railway.',
+          ephemeral: true
+        });
+        return;
+      }
+
+      const message = await ensureRolePanel(interaction.client);
+      if (!message) {
+        await interaction.reply({
+          content: 'I could not create or refresh the role panel. Check the configured channel and bot permissions.',
+          ephemeral: true
+        });
+        return;
+      }
 
       await interaction.reply({
-        content: roleItems.length > 0
-          ? `Available self-assignable roles:\n${roleItems.join('\n')}`
+        content: `Role panel refreshed in <#${message.channelId}>.`,
+        ephemeral: true
+      });
+      return;
+    }
+
+    const configuredRoles = getConfiguredRoles(interaction.guild);
+
+    if (subcommand === 'list') {
+      const roleMentions = formatRoleMentions(configuredRoles.map((role) => role.id), interaction.guild);
+
+      await interaction.reply({
+        content: roleMentions.length > 0
+          ? `Available self-assignable roles:\n${roleMentions.join('\n')}`
           : 'No configured self-assignable roles are currently available in this server.',
         ephemeral: true
       });
@@ -104,7 +130,7 @@ module.exports = {
 
     const role = interaction.options.getRole('role', true);
 
-    if (!configuredRoleIds.has(role.id)) {
+    if (!configuredRoleIds.includes(role.id)) {
       await interaction.reply({
         content: `${role} is not in the self-assignable role list.`,
         ephemeral: true

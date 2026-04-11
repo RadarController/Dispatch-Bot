@@ -1,4 +1,28 @@
+const { handleRolePanelInteraction, isRolePanelInteraction } = require('../rolesPanel');
+
 module.exports = async (interaction, client) => {
+  if (isRolePanelInteraction(interaction)) {
+    try {
+      await handleRolePanelInteraction(interaction);
+    } catch (error) {
+      console.error(`Role panel interaction failed: ${interaction.customId}`, error);
+
+      const payload = {
+        content: 'Something went wrong while updating your roles.',
+        ephemeral: true
+      };
+
+      if (interaction.deferred || interaction.replied) {
+        await interaction.followUp(payload);
+        return;
+      }
+
+      await interaction.reply(payload);
+    }
+
+    return;
+  }
+
   if (!interaction.isChatInputCommand()) {
     return;
   }
