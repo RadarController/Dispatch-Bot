@@ -8,3 +8,6 @@ pnpm-debug.log*
 .DS_Store
 coverage/
 data/
+/.vs/Dispatch-Bot.slnx
+/.vs/slnx.sqlite
+/.vs/VSWorkspaceState.json
