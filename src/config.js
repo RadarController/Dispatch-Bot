@@ -11,7 +11,7 @@ const config = {
   metarApiBase: process.env.METAR_API_BASE || '',
   metarApiKey: process.env.METAR_API_KEY || '',
   vatsimDataUrl: process.env.VATSIM_DATA_URL || 'https://data.vatsim.net/v3/vatsim-data.json',
-  vatsimAipBaseUrl: process.env.VATSIM_AIP_API_BASE || 'https://vatsim.dev/api/aip-api',
+  vatsimAipBaseUrl: process.env.VATSIM_AIP_API_BASE || 'https://my.vatsim.net/api/v2/aip',
   dataFilePath: process.env.DISPATCH_BOT_DATA_FILE || '',
   livePollIntervalMs: Number.isInteger(requestedLivePollIntervalMs) && requestedLivePollIntervalMs >= 15000
     ? requestedLivePollIntervalMs

@@ -1,11 +1,10 @@
 const { EmbedBuilder, SlashCommandBuilder } = require('discord.js');
 const {
     fetchVatsimData,
-    getAirportControllers,
-    getAirportControllerDebug,
+    getAirportControllerMatchResult,
     getRelatedEnrouteControllers
 } = require('../vatsimData');
-const { fetchAirportFromAip, getAirportFetchDebug } = require('../vatsimAip');
+const { fetchAirportFromAip } = require('../vatsimAip');
 
 const ATC_EMBED_COLOUR = 0x1f6feb;
 const FIELD_LIMIT = 1024;
@@ -40,50 +39,7 @@ function trimFieldValue(value) {
     return truncateText(value, FIELD_LIMIT);
 }
 
-function formatBoolean(value) {
-    return value ? 'yes' : 'no';
-}
-
-function formatMatchSource(debug) {
-    if (!debug) {
-        return 'fallback';
-    }
-
-    if (debug.matchSource === 'aip') {
-        return 'AIP';
-    }
-
-    if (debug.matchSource === 'fallback') {
-        return 'fallback';
-    }
-
-    return String(debug.matchSource || 'fallback');
-}
-
-function formatMatchedLocalCallsigns(controllers) {
-    if (!Array.isArray(controllers) || controllers.length === 0) {
-        return 'None';
-    }
-
-    return controllers.map((controller) => controller.callsign).join(', ');
-}
-
-function buildDebugBlock(icao, airport, debug, controllers, aipDebug) {
-    const resolvedAipDebug = aipDebug || getAirportFetchDebug(icao);
-    const aipUrlUsed = resolvedAipDebug?.url || 'N/A';
-    const aipHttpResult = resolvedAipDebug?.httpResult || 'unknown';
-
-    return [
-        `AIP found: ${formatBoolean(Boolean(airport))}`,
-        `AIP stations: ${airport?.stations?.length || 0}`,
-        `Match source: ${formatMatchSource(debug)}`,
-        `Matched local callsigns: ${formatMatchedLocalCallsigns(controllers)}`,
-        `AIP URL used: ${aipUrlUsed}`,
-        `AIP HTTP result: ${aipHttpResult}`
-    ].join('\n');
-}
-
-function buildAtcEmbed(icao, airport, controllers, relatedEnrouteControllers, debug, aipDebug) {
+function buildAtcEmbed(icao, airport, controllers, relatedEnrouteControllers, usedAipMatch) {
     const embed = new EmbedBuilder()
         .setColor(ATC_EMBED_COLOUR)
         .setTitle(`${icao} Online ATC`);
@@ -114,17 +70,11 @@ function buildAtcEmbed(icao, airport, controllers, relatedEnrouteControllers, de
         });
     }
 
-    embed.addFields({
-        name: 'Debug',
-        value: trimFieldValue(buildDebugBlock(icao, airport, debug, controllers, aipDebug)),
-        inline: false
-    });
-
     const footerParts = [`${controllers.length} local position${controllers.length === 1 ? '' : 's'} online`];
     if (relatedEnrouteControllers.length > 0) {
         footerParts.push(`${relatedEnrouteControllers.length} area position${relatedEnrouteControllers.length === 1 ? '' : 's'} matched`);
     }
-    footerParts.push(formatMatchSource(debug) === 'AIP' ? 'Matched against VATSIM AIP stations' : 'Fallback airport-prefix match');
+    footerParts.push(usedAipMatch ? 'Matched against VATSIM AIP stations' : 'Fallback airport-prefix match');
 
     return embed.setFooter({ text: footerParts.join(' • ') });
 }
@@ -159,35 +109,28 @@ module.exports = {
                 fetchAirportFromAip(icao)
             ]);
 
-            const aipDebug = getAirportFetchDebug(icao);
-
-            console.log('[ATC_AIP]', {
-                icao,
-                airportFound: Boolean(airport),
-                airportIcao: airport?.icao || null,
-                airportIata: airport?.iata || null,
-                stationCount: airport?.stations?.length || 0,
-                stationCallsigns: (airport?.stations || []).map((station) => station.callsign)
-            });
-
-            const debug = getAirportControllerDebug(data, icao, airport);
-            const controllers = getAirportControllers(data, icao, airport);
+            const controllerResult = getAirportControllerMatchResult(data, icao, airport);
+            const controllers = controllerResult.controllers;
             const relatedEnrouteControllers = airport
                 ? getRelatedEnrouteControllers(data, icao, airport, controllers)
                 : [];
 
-            console.log('[ATC_MATCH]', {
-                icao,
-                airportFound: Boolean(airport),
-                matchSource: debug.matchSource,
-                matchedStationCallsigns: debug.matchedStationCallsigns,
-                matchedLocalCallsigns: controllers.map((controller) => controller.callsign),
-                relatedEnrouteCallsigns: relatedEnrouteControllers.map((controller) => controller.callsign),
-                liveControllerCallsigns: (Array.isArray(data?.controllers) ? data.controllers : []).map((controller) => controller.callsign)
-            });
+            if (controllers.length === 0 && relatedEnrouteControllers.length === 0) {
+                const sourceDetail = airport
+                    ? 'The airport was found in the VATSIM AIP, but no matching local or area positions are online right now.'
+                    : 'No airport-specific VATSIM ATC is currently online for this airport.';
+                await interaction.editReply(`${sourceDetail} (${icao})`);
+                return;
+            }
 
             await interaction.editReply({
-                embeds: [buildAtcEmbed(icao, airport, controllers, relatedEnrouteControllers, debug, aipDebug)]
+                embeds: [buildAtcEmbed(
+                    icao,
+                    airport,
+                    controllers,
+                    relatedEnrouteControllers,
+                    controllerResult.matchSource === 'aip'
+                )]
             });
         } catch (error) {
             const status = error.response?.status;

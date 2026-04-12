@@ -189,53 +189,38 @@ function controllerMatchesStation(controller, station, airportTokens) {
     return false;
 }
 
-function getAirportControllerDebug(data, icao, airport = null) {
+function getAirportControllerMatchResult(data, icao, airport = null) {
     const normalisedIcao = normaliseIcao(icao);
     const prefix = `${normalisedIcao}_`;
     const controllers = Array.isArray(data?.controllers) ? data.controllers : [];
 
     if (!airport || !Array.isArray(airport.stations) || airport.stations.length === 0) {
-        const fallbackControllers = sortControllers(controllers.filter((controller) => {
-            const callsign = normaliseCallsign(controller?.callsign);
-            return callsign.startsWith(prefix) && !callsign.endsWith('_ATIS');
-        }));
-
         return {
             matchSource: 'fallback',
-            controllers: fallbackControllers,
-            matchedStationCallsigns: []
+            controllers: sortControllers(controllers.filter((controller) => {
+                const callsign = normaliseCallsign(controller?.callsign);
+                return callsign.startsWith(prefix) && !callsign.endsWith('_ATIS');
+            }))
         };
     }
 
     const airportTokens = buildAirportTokens(normalisedIcao, airport);
-    const matchedStationCallsigns = new Set();
-
-    const matchedControllers = sortControllers(controllers.filter((controller) => {
-        const callsign = normaliseCallsign(controller?.callsign);
-        if (!callsign || callsign.endsWith('_ATIS')) {
-            return false;
-        }
-
-        let matched = false;
-        for (const station of airport.stations) {
-            if (controllerMatchesStation(controller, station, airportTokens)) {
-                matched = true;
-                matchedStationCallsigns.add(normaliseCallsign(station.callsign));
-            }
-        }
-
-        return matched;
-    }));
 
     return {
         matchSource: 'aip',
-        controllers: matchedControllers,
-        matchedStationCallsigns: [...matchedStationCallsigns].sort()
+        controllers: sortControllers(controllers.filter((controller) => {
+            const callsign = normaliseCallsign(controller?.callsign);
+            if (!callsign || callsign.endsWith('_ATIS')) {
+                return false;
+            }
+
+            return airport.stations.some((station) => controllerMatchesStation(controller, station, airportTokens));
+        }))
     };
 }
 
 function getAirportControllers(data, icao, airport = null) {
-    return getAirportControllerDebug(data, icao, airport).controllers;
+    return getAirportControllerMatchResult(data, icao, airport).controllers;
 }
 
 function getRelatedEnrouteControllers(data, icao, airport = null, excludedControllers = []) {
@@ -336,8 +321,8 @@ function findCallsignRecord(data, callsign) {
 module.exports = {
     fetchVatsimData,
     getAirportAtis,
+    getAirportControllerMatchResult,
     getAirportControllers,
-    getAirportControllerDebug,
     getRelatedEnrouteControllers,
     findCallsignRecord,
     normaliseCallsign,
