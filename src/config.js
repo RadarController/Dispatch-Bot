@@ -10,6 +10,7 @@ const config = {
   discordGuildId: process.env.DISCORD_GUILD_ID || '',
   metarApiBase: process.env.METAR_API_BASE || '',
   metarApiKey: process.env.METAR_API_KEY || '',
+  vatsimDataUrl: process.env.VATSIM_DATA_URL || 'https://data.vatsim.net/v3/vatsim-data.json',
   dataFilePath: process.env.DISPATCH_BOT_DATA_FILE || '',
   livePollIntervalMs: Number.isInteger(requestedLivePollIntervalMs) && requestedLivePollIntervalMs >= 15000
     ? requestedLivePollIntervalMs
