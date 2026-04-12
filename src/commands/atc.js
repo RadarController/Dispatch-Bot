@@ -30,29 +30,29 @@ function formatTopDownControllers(controllers) {
 function getLayerStyle(entry) {
     switch (entry.key) {
         case 'center':
-            return { icon: '🟨', accent: '◉' };
+            return { icon: '🟨', arrow: '🟨', accent: '⚶' };
         case 'approach':
-            return { icon: '🟩', accent: '◉' };
+            return { icon: '🟦', arrow: '🟦', accent: '◉' };
         case 'directorFinal':
-            return { icon: '🟦', accent: '✦' };
+            return { icon: '🟦', arrow: '🟦', accent: '✦' };
         case 'tower':
-            return { icon: '🟥', accent: '▲' };
+            return { icon: '🟥', arrow: '🟥', accent: '▲' };
         case 'ground':
-            return { icon: '🟩', accent: '▣' };
+            return { icon: '🟩', arrow: '🟩', accent: '▣' };
         case 'delivery':
-            return { icon: '🟪', accent: '✎' };
+            return { icon: '🟪', arrow: '🟪', accent: '✎' };
         default:
-            return { icon: '⬜', accent: '•' };
+            return { icon: '⬜', arrow: '⬜', accent: '•' };
     }
 }
 
 function getControllerDisplayLine(controller) {
-    return `\`${controller.callsign}\` (\`${controller.frequency}\`)`;
+    return `\`${controller.callsign}\`  \`${controller.frequency}\``;
 }
 
 function getControllerInfoLine(controller) {
     const info = Array.isArray(controller?.text_atis) ? controller.text_atis[0] : '';
-    return truncateText(String(info || '').trim(), 68);
+    return truncateText(String(info || '').trim(), 70);
 }
 
 function buildEntryLines(entry) {
@@ -62,21 +62,21 @@ function buildEntryLines(entry) {
     if (entry.status === 'online') {
         const [primaryController] = entry.controllers;
         if (primaryController) {
-            lines.push(`   ${style.accent} ${getControllerDisplayLine(primaryController)}`);
+            lines.push(`┆ ${style.accent} ${getControllerDisplayLine(primaryController)}`);
             const infoLine = getControllerInfoLine(primaryController);
             if (infoLine) {
-                lines.push(`   ${infoLine}`);
+                lines.push(`┆ ${infoLine}`);
             }
 
             if (entry.controllers.length > 1) {
                 const additional = entry.controllers.slice(1).map((controller) => `${controller.callsign} (${controller.frequency})`);
-                lines.push(`   + ${truncateText(additional.join(', '), 70)}`);
+                lines.push(`┆ + ${truncateText(additional.join(', '), 74)}`);
             }
         }
     } else if (entry.status === 'covered') {
-        lines.push(`   ↳ covered top-down by ${truncateText(formatTopDownControllers(entry.controllers), 62)}`);
+        lines.push(`┆ ⇣ covered top-down by ${truncateText(formatTopDownControllers(entry.controllers), 62)}`);
     } else {
-        lines.push('   — Unstaffed');
+        lines.push('┆ ✕ unstaffed');
     }
 
     return lines;
@@ -93,12 +93,11 @@ function buildGraphicalTopDownBlock(topDownCoverage) {
         lines.push(...buildEntryLines(entry));
 
         if (index < topDownCoverage.entries.length - 1) {
-            lines.push('   │');
+            const nextStyle = getLayerStyle(topDownCoverage.entries[index + 1]);
+            lines.push(` ${nextStyle.arrow}`);
+            lines.push(' │');
         }
     });
-
-    lines.push('');
-    lines.push('`Top-down coverage`');
 
     return lines.join('\n');
 }
