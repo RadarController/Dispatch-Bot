@@ -5,9 +5,25 @@ const CACHE_MS = 6 * 60 * 60 * 1000;
 
 const airportCache = new Map();
 const inFlightAirports = new Map();
+const airportDebug = new Map();
 
 function getAipBaseUrl() {
     return config.vatsimAipBaseUrl || 'https://vatsim.dev/api/aip-api';
+}
+
+function buildAipAirportUrl(icao) {
+    return `${getAipBaseUrl().replace(/\/$/, '')}/airports/${encodeURIComponent(normaliseIcao(icao))}`;
+}
+
+function setAirportFetchDebug(icao, details) {
+    airportDebug.set(normaliseIcao(icao), {
+        icao: normaliseIcao(icao),
+        ...details
+    });
+}
+
+function getAirportFetchDebug(icao) {
+    return airportDebug.get(normaliseIcao(icao)) || null;
 }
 
 function normaliseIcao(icao) {
@@ -65,8 +81,26 @@ async function fetchAirportFromAip(icao) {
     const now = Date.now();
     const cached = airportCache.get(normalisedIcao);
     if (cached && (now - cached.cachedAt) < CACHE_MS) {
+        const existingDebug = getAirportFetchDebug(normalisedIcao);
+        const url = buildAipAirportUrl(normalisedIcao);
+        const httpResult = existingDebug?.httpResult
+            ? `${existingDebug.httpResult} (cached)`
+            : (cached.airport ? '200 (cached)' : 'unknown (cached)');
+
+        setAirportFetchDebug(normalisedIcao, {
+            url,
+            httpResult,
+            cached: true,
+            airportFound: Boolean(cached.airport),
+            airportIcao: cached.airport?.icao || null,
+            airportIata: cached.airport?.iata || null,
+            stationCount: cached.airport?.stations?.length || 0
+        });
+
         console.log('[ATC_AIP_FETCH]', {
             icao: normalisedIcao,
+            url,
+            httpResult,
             cached: true,
             airportFound: Boolean(cached.airport),
             airportIcao: cached.airport?.icao || null,
@@ -80,7 +114,9 @@ async function fetchAirportFromAip(icao) {
         return inFlightAirports.get(normalisedIcao);
     }
 
-    const request = axios.get(`${getAipBaseUrl().replace(/\/$/, '')}/airports/${encodeURIComponent(normalisedIcao)}`, {
+    const requestUrl = buildAipAirportUrl(normalisedIcao);
+
+    const request = axios.get(requestUrl, {
         headers: {
             Accept: 'application/json',
             'User-Agent': 'Dispatch Bot/1.0'
@@ -89,9 +125,19 @@ async function fetchAirportFromAip(icao) {
         validateStatus: (status) => (status >= 200 && status < 300) || status === 404
     }).then((response) => {
         if (response.status === 404) {
+            setAirportFetchDebug(normalisedIcao, {
+                url: requestUrl,
+                httpResult: '404',
+                cached: false,
+                airportFound: false,
+                airportIcao: null,
+                airportIata: null,
+                stationCount: 0
+            });
             console.log('[ATC_AIP_FETCH]', {
                 icao: normalisedIcao,
-                status: 404,
+                url: requestUrl,
+                httpResult: '404',
                 cached: false,
                 airportFound: false
             });
@@ -103,9 +149,19 @@ async function fetchAirportFromAip(icao) {
             airport,
             cachedAt: Date.now()
         });
+        setAirportFetchDebug(normalisedIcao, {
+            url: requestUrl,
+            httpResult: String(response.status),
+            cached: false,
+            airportFound: Boolean(airport),
+            airportIcao: airport?.icao || null,
+            airportIata: airport?.iata || null,
+            stationCount: airport?.stations?.length || 0
+        });
         console.log('[ATC_AIP_FETCH]', {
             icao: normalisedIcao,
-            status: response.status,
+            url: requestUrl,
+            httpResult: String(response.status),
             cached: false,
             airportFound: Boolean(airport),
             airportIcao: airport?.icao || null,
@@ -113,6 +169,26 @@ async function fetchAirportFromAip(icao) {
             stationCount: airport?.stations?.length || 0
         });
         return airport;
+    }).catch((error) => {
+        setAirportFetchDebug(normalisedIcao, {
+            url: requestUrl,
+            httpResult: 'error',
+            cached: false,
+            airportFound: false,
+            airportIcao: null,
+            airportIata: null,
+            stationCount: 0,
+            errorMessage: error?.message || 'Unknown error'
+        });
+        console.log('[ATC_AIP_FETCH]', {
+            icao: normalisedIcao,
+            url: requestUrl,
+            httpResult: 'error',
+            cached: false,
+            airportFound: false,
+            errorMessage: error?.message || 'Unknown error'
+        });
+        throw error;
     }).finally(() => {
         inFlightAirports.delete(normalisedIcao);
     });
@@ -123,6 +199,7 @@ async function fetchAirportFromAip(icao) {
 
 module.exports = {
     fetchAirportFromAip,
+    getAirportFetchDebug,
     normaliseCallsign,
     normaliseFrequency,
     normaliseIcao

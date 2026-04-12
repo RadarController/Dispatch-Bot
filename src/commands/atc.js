@@ -5,7 +5,7 @@ const {
     getAirportControllerDebug,
     getRelatedEnrouteControllers
 } = require('../vatsimData');
-const { fetchAirportFromAip } = require('../vatsimAip');
+const { fetchAirportFromAip, getAirportFetchDebug } = require('../vatsimAip');
 
 const ATC_EMBED_COLOUR = 0x1f6feb;
 const FIELD_LIMIT = 1024;
@@ -68,16 +68,22 @@ function formatMatchedLocalCallsigns(controllers) {
     return controllers.map((controller) => controller.callsign).join(', ');
 }
 
-function buildDebugBlock(airport, debug, controllers) {
+function buildDebugBlock(icao, airport, debug, controllers, aipDebug) {
+    const resolvedAipDebug = aipDebug || getAirportFetchDebug(icao);
+    const aipUrlUsed = resolvedAipDebug?.url || 'N/A';
+    const aipHttpResult = resolvedAipDebug?.httpResult || 'unknown';
+
     return [
         `AIP found: ${formatBoolean(Boolean(airport))}`,
         `AIP stations: ${airport?.stations?.length || 0}`,
         `Match source: ${formatMatchSource(debug)}`,
-        `Matched local callsigns: ${formatMatchedLocalCallsigns(controllers)}`
+        `Matched local callsigns: ${formatMatchedLocalCallsigns(controllers)}`,
+        `AIP URL used: ${aipUrlUsed}`,
+        `AIP HTTP result: ${aipHttpResult}`
     ].join('\n');
 }
 
-function buildAtcEmbed(icao, airport, controllers, relatedEnrouteControllers, debug) {
+function buildAtcEmbed(icao, airport, controllers, relatedEnrouteControllers, debug, aipDebug) {
     const embed = new EmbedBuilder()
         .setColor(ATC_EMBED_COLOUR)
         .setTitle(`${icao} Online ATC`);
@@ -110,7 +116,7 @@ function buildAtcEmbed(icao, airport, controllers, relatedEnrouteControllers, de
 
     embed.addFields({
         name: 'Debug',
-        value: trimFieldValue(buildDebugBlock(airport, debug, controllers)),
+        value: trimFieldValue(buildDebugBlock(icao, airport, debug, controllers, aipDebug)),
         inline: false
     });
 
@@ -153,6 +159,8 @@ module.exports = {
                 fetchAirportFromAip(icao)
             ]);
 
+            const aipDebug = getAirportFetchDebug(icao);
+
             console.log('[ATC_AIP]', {
                 icao,
                 airportFound: Boolean(airport),
@@ -179,7 +187,7 @@ module.exports = {
             });
 
             await interaction.editReply({
-                embeds: [buildAtcEmbed(icao, airport, controllers, relatedEnrouteControllers, debug)]
+                embeds: [buildAtcEmbed(icao, airport, controllers, relatedEnrouteControllers, debug, aipDebug)]
             });
         } catch (error) {
             const status = error.response?.status;
