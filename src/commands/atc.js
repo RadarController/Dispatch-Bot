@@ -101,10 +101,27 @@ module.exports = {
                 fetchAirportFromAip(icao)
             ]);
 
+            console.log('[ATC_AIP]', {
+                icao,
+                airportFound: Boolean(airport),
+                airportIcao: airport?.icao || null,
+                airportIata: airport?.iata || null,
+                stationCount: airport?.stations?.length || 0,
+                stationCallsigns: (airport?.stations || []).map((station) => station.callsign)
+            });
+
             const controllers = getAirportControllers(data, icao, airport);
             const relatedEnrouteControllers = airport
                 ? getRelatedEnrouteControllers(data, icao, airport, controllers)
                 : [];
+
+            console.log('[ATC_MATCH]', {
+                icao,
+                airportFound: Boolean(airport),
+                matchedLocalCallsigns: controllers.map((controller) => controller.callsign),
+                relatedEnrouteCallsigns: relatedEnrouteControllers.map((controller) => controller.callsign),
+                liveControllerCallsigns: (Array.isArray(data?.controllers) ? data.controllers : []).map((controller) => controller.callsign)
+            });
 
             if (controllers.length === 0 && relatedEnrouteControllers.length === 0) {
                 const sourceDetail = airport

@@ -81,9 +81,11 @@ async function fetchAirportFromAip(icao) {
         validateStatus: (status) => (status >= 200 && status < 300) || status === 404
     }).then((response) => {
         if (response.status === 404) {
-            airportCache.set(normalisedIcao, {
-                airport: null,
-                cachedAt: Date.now()
+            console.log('[ATC_AIP_FETCH]', {
+                icao: normalisedIcao,
+                status: 404,
+                cached: false,
+                airportFound: false
             });
             return null;
         }
@@ -92,6 +94,15 @@ async function fetchAirportFromAip(icao) {
         airportCache.set(normalisedIcao, {
             airport,
             cachedAt: Date.now()
+        });
+        console.log('[ATC_AIP_FETCH]', {
+            icao: normalisedIcao,
+            status: response.status,
+            cached: false,
+            airportFound: Boolean(airport),
+            airportIcao: airport?.icao || null,
+            airportIata: airport?.iata || null,
+            stationCount: airport?.stations?.length || 0
         });
         return airport;
     }).finally(() => {
