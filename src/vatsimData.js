@@ -19,6 +19,29 @@ function normaliseCallsign(callsign) {
     return String(callsign || '').trim().toUpperCase().replace(/\s+/g, '');
 }
 
+function normaliseFrequency(frequency) {
+    if (frequency === null || frequency === undefined || frequency === '') {
+        return '';
+    }
+
+    const numeric = Number.parseFloat(String(frequency));
+    if (!Number.isFinite(numeric)) {
+        return String(frequency).trim();
+    }
+
+    return numeric.toFixed(3);
+}
+
+function getControllerRole(callsign) {
+    const parts = String(callsign || '').split('_');
+    return parts[parts.length - 1] || '';
+}
+
+function getControllerBase(callsign) {
+    const parts = String(callsign || '').split('_');
+    return parts[0] || '';
+}
+
 async function fetchVatsimData() {
     const now = Date.now();
 
@@ -59,10 +82,8 @@ function sortControllers(controllers) {
     };
 
     return [...controllers].sort((left, right) => {
-        const leftParts = String(left.callsign || '').split('_');
-        const rightParts = String(right.callsign || '').split('_');
-        const leftType = leftParts[leftParts.length - 1] || '';
-        const rightType = rightParts[rightParts.length - 1] || '';
+        const leftType = getControllerRole(left.callsign || '');
+        const rightType = getControllerRole(right.callsign || '');
         const leftRank = typeOrder[leftType] ?? 99;
         const rightRank = typeOrder[rightType] ?? 99;
 
@@ -74,14 +95,158 @@ function sortControllers(controllers) {
     });
 }
 
-function getAirportControllers(data, icao) {
+function tokeniseAirportText(value) {
+    return String(value || '')
+        .toUpperCase()
+        .split(/[^A-Z0-9]+/)
+        .map((token) => token.trim())
+        .filter((token) => token.length >= 3);
+}
+
+function buildAirportTokens(icao, airport) {
+    const tokens = new Set([normaliseIcao(icao)]);
+
+    if (!airport) {
+        return tokens;
+    }
+
+    if (airport.iata) {
+        tokens.add(String(airport.iata).toUpperCase());
+    }
+
+    for (const token of tokeniseAirportText(airport.name)) {
+        tokens.add(token);
+    }
+
+    for (const token of tokeniseAirportText(airport.city)) {
+        tokens.add(token);
+    }
+
+    for (const station of airport.stations || []) {
+        const callsign = normaliseCallsign(station.callsign);
+        const base = getControllerBase(callsign);
+        const role = getControllerRole(callsign);
+
+        if (base) {
+            tokens.add(base);
+        }
+
+        if (role) {
+            tokens.add(`${normaliseIcao(icao)}_${role}`);
+            if (airport.iata) {
+                tokens.add(`${String(airport.iata).toUpperCase()}_${role}`);
+            }
+        }
+    }
+
+    return tokens;
+}
+
+function tokenLooksRelated(left, right) {
+    if (!left || !right) {
+        return false;
+    }
+
+    if (left === right) {
+        return true;
+    }
+
+    return left.endsWith(right) || right.endsWith(left);
+}
+
+function controllerMatchesStation(controller, station, airportTokens) {
+    const controllerCallsign = normaliseCallsign(controller?.callsign);
+    const stationCallsign = normaliseCallsign(station?.callsign);
+    if (!controllerCallsign || !stationCallsign) {
+        return false;
+    }
+
+    if (controllerCallsign === stationCallsign) {
+        return true;
+    }
+
+    const controllerRole = getControllerRole(controllerCallsign);
+    const stationRole = getControllerRole(stationCallsign);
+    const controllerFrequency = normaliseFrequency(controller?.frequency);
+    const stationFrequency = normaliseFrequency(station?.frequency);
+    const controllerBase = getControllerBase(controllerCallsign);
+    const stationBase = getControllerBase(stationCallsign);
+
+    if (controllerRole !== stationRole || !controllerFrequency || !stationFrequency || controllerFrequency !== stationFrequency) {
+        return false;
+    }
+
+    if (tokenLooksRelated(controllerBase, stationBase)) {
+        return true;
+    }
+
+    for (const token of airportTokens) {
+        if (tokenLooksRelated(controllerBase, token)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function getAirportControllers(data, icao, airport = null) {
     const normalisedIcao = normaliseIcao(icao);
     const prefix = `${normalisedIcao}_`;
     const controllers = Array.isArray(data?.controllers) ? data.controllers : [];
 
+    if (!airport || !Array.isArray(airport.stations) || airport.stations.length === 0) {
+        return sortControllers(controllers.filter((controller) => {
+            const callsign = normaliseCallsign(controller?.callsign);
+            return callsign.startsWith(prefix) && !callsign.endsWith('_ATIS');
+        }));
+    }
+
+    const airportTokens = buildAirportTokens(normalisedIcao, airport);
+
     return sortControllers(controllers.filter((controller) => {
         const callsign = normaliseCallsign(controller?.callsign);
-        return callsign.startsWith(prefix) && !callsign.endsWith('_ATIS');
+        if (!callsign || callsign.endsWith('_ATIS')) {
+            return false;
+        }
+
+        return airport.stations.some((station) => controllerMatchesStation(controller, station, airportTokens));
+    }));
+}
+
+function getRelatedEnrouteControllers(data, icao, airport = null, excludedControllers = []) {
+    if (!airport) {
+        return [];
+    }
+
+    const controllers = Array.isArray(data?.controllers) ? data.controllers : [];
+    const excluded = new Set(excludedControllers.map((controller) => normaliseCallsign(controller?.callsign)));
+    const airportTokens = buildAirportTokens(icao, airport);
+    const localStationCallsigns = new Set((airport.stations || []).map((station) => normaliseCallsign(station.callsign)));
+    const allowedRoles = new Set(['APP', 'DEP', 'CTR', 'FSS']);
+
+    return sortControllers(controllers.filter((controller) => {
+        const callsign = normaliseCallsign(controller?.callsign);
+        if (!callsign || callsign.endsWith('_ATIS') || excluded.has(callsign) || localStationCallsigns.has(callsign)) {
+            return false;
+        }
+
+        const role = getControllerRole(callsign);
+        if (!allowedRoles.has(role)) {
+            return false;
+        }
+
+        const base = getControllerBase(callsign);
+        if ([...airportTokens].some((token) => tokenLooksRelated(base, token))) {
+            return true;
+        }
+
+        const searchableText = [
+            callsign,
+            controller?.name,
+            ...(Array.isArray(controller?.text_atis) ? controller.text_atis : [])
+        ].join(' ').toUpperCase();
+
+        return [...airportTokens].some((token) => token.length >= 3 && searchableText.includes(token));
     }));
 }
 
@@ -147,7 +312,9 @@ module.exports = {
     fetchVatsimData,
     getAirportAtis,
     getAirportControllers,
+    getRelatedEnrouteControllers,
     findCallsignRecord,
     normaliseCallsign,
+    normaliseFrequency,
     normaliseIcao
 };
