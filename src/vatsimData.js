@@ -7,6 +7,15 @@ let cachedData = null;
 let cachedAt = 0;
 let inFlightPromise = null;
 
+const TOP_DOWN_LAYERS = [
+    { key: 'center', label: 'Area / Center' },
+    { key: 'approach', label: 'Radar / Approach' },
+    { key: 'directorFinal', label: 'Director / Final' },
+    { key: 'tower', label: 'Tower' },
+    { key: 'ground', label: 'Ground' },
+    { key: 'delivery', label: 'Delivery' }
+];
+
 function getDataUrl() {
     return config.vatsimDataUrl || 'https://data.vatsim.net/v3/vatsim-data.json';
 }
@@ -189,6 +198,38 @@ function controllerMatchesStation(controller, station, airportTokens) {
     return false;
 }
 
+function classifyStationLayer(station) {
+    const callsign = normaliseCallsign(station?.callsign);
+    const role = getControllerRole(callsign);
+    const searchable = `${String(station?.name || '').toUpperCase()} ${callsign}`;
+
+    if (/\bDIRECTOR\b/.test(searchable) || /\bFINAL\b/.test(searchable) || /(^|_)DIR($|_)/.test(callsign) || /(^|_)FINAL($|_)/.test(callsign) || /(^|_)FIN($|_)/.test(callsign)) {
+        return 'directorFinal';
+    }
+
+    if (role === 'CTR' || role === 'FSS') {
+        return 'center';
+    }
+
+    if (role === 'APP' || role === 'DEP') {
+        return 'approach';
+    }
+
+    if (role === 'TWR') {
+        return 'tower';
+    }
+
+    if (role === 'GND') {
+        return 'ground';
+    }
+
+    if (role === 'DEL') {
+        return 'delivery';
+    }
+
+    return null;
+}
+
 function getAirportControllerMatchResult(data, icao, airport = null) {
     const normalisedIcao = normaliseIcao(icao);
     const prefix = `${normalisedIcao}_`;
@@ -249,6 +290,122 @@ function getRelatedEnrouteControllers(data, icao, airport = null, excludedContro
 
         return areaStationCallsigns.has(callsign);
     }));
+}
+
+function buildLayerStationDefinitions(airport) {
+    const layerStations = new Map(TOP_DOWN_LAYERS.map((layer) => [layer.key, []]));
+
+    for (const station of airport?.stations || []) {
+        const layerKey = classifyStationLayer(station);
+        if (!layerKey || !layerStations.has(layerKey)) {
+            continue;
+        }
+
+        layerStations.get(layerKey).push(station);
+    }
+
+    return layerStations;
+}
+
+function findStationForController(controller, airport) {
+    const airportTokens = buildAirportTokens(airport?.icao || '', airport);
+    return (airport?.stations || []).find((station) => controllerMatchesStation(controller, station, airportTokens)) || null;
+}
+
+function classifyControllerLayer(controller, airport) {
+    const matchedStation = findStationForController(controller, airport);
+    if (matchedStation) {
+        return classifyStationLayer(matchedStation);
+    }
+
+    return classifyStationLayer({
+        callsign: controller?.callsign,
+        name: Array.isArray(controller?.text_atis) && controller.text_atis.length > 0 ? controller.text_atis[0] : ''
+    });
+}
+
+function dedupeControllers(controllers) {
+    const byCallsign = new Map();
+
+    for (const controller of controllers || []) {
+        const callsign = normaliseCallsign(controller?.callsign);
+        if (!callsign || byCallsign.has(callsign)) {
+            continue;
+        }
+
+        byCallsign.set(callsign, controller);
+    }
+
+    return sortControllers([...byCallsign.values()]);
+}
+
+function getAirportTopDownCoverage(airport, matchedControllers = []) {
+    if (!airport || !Array.isArray(airport.stations) || airport.stations.length === 0) {
+        return null;
+    }
+
+    const layerStations = buildLayerStationDefinitions(airport);
+    const visibleLayers = TOP_DOWN_LAYERS.filter((layer) => (layerStations.get(layer.key) || []).length > 0);
+
+    if (visibleLayers.length === 0) {
+        return null;
+    }
+
+    const onlineByLayer = new Map(visibleLayers.map((layer) => [layer.key, []]));
+
+    for (const controller of matchedControllers) {
+        const layerKey = classifyControllerLayer(controller, airport);
+        if (!layerKey || !onlineByLayer.has(layerKey)) {
+            continue;
+        }
+
+        onlineByLayer.get(layerKey).push(controller);
+    }
+
+    for (const [key, controllers] of onlineByLayer.entries()) {
+        onlineByLayer.set(key, dedupeControllers(controllers));
+    }
+
+    const entries = [];
+    let inheritedControllers = [];
+
+    for (const layer of visibleLayers) {
+        const explicitControllers = onlineByLayer.get(layer.key) || [];
+
+        if (explicitControllers.length > 0) {
+            inheritedControllers = explicitControllers;
+            entries.push({
+                key: layer.key,
+                label: layer.label,
+                status: 'online',
+                controllers: explicitControllers
+            });
+            continue;
+        }
+
+        if (inheritedControllers.length > 0) {
+            entries.push({
+                key: layer.key,
+                label: layer.label,
+                status: 'covered',
+                controllers: inheritedControllers
+            });
+            continue;
+        }
+
+        entries.push({
+            key: layer.key,
+            label: layer.label,
+            status: 'unstaffed',
+            controllers: []
+        });
+    }
+
+    return {
+        entries,
+        visibleLayers: visibleLayers.map((layer) => layer.key),
+        onlineControllers: dedupeControllers(matchedControllers)
+    };
 }
 
 function getAirportAtis(data, icao) {
@@ -314,6 +471,7 @@ module.exports = {
     getAirportAtis,
     getAirportControllerMatchResult,
     getAirportControllers,
+    getAirportTopDownCoverage,
     getRelatedEnrouteControllers,
     findCallsignRecord,
     normaliseCallsign,

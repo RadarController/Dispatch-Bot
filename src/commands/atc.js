@@ -2,7 +2,7 @@ const { EmbedBuilder, SlashCommandBuilder } = require('discord.js');
 const {
     fetchVatsimData,
     getAirportControllerMatchResult,
-    getRelatedEnrouteControllers
+    getAirportTopDownCoverage
 } = require('../vatsimData');
 const { fetchAirportFromAip } = require('../vatsimAip');
 
@@ -17,6 +17,10 @@ function truncateText(text, maxLength) {
     }
 
     return `${stringValue.slice(0, Math.max(0, maxLength - 1))}…`;
+}
+
+function trimFieldValue(value) {
+    return truncateText(value, FIELD_LIMIT);
 }
 
 function formatControllerLine(controller) {
@@ -35,11 +39,29 @@ function buildControllerBlock(controllers) {
     return controllers.map((controller) => formatControllerLine(controller)).join('\n');
 }
 
-function trimFieldValue(value) {
-    return truncateText(value, FIELD_LIMIT);
+function formatTopDownControllers(controllers) {
+    return controllers.map((controller) => `**${controller.callsign}** (${controller.frequency})`).join(', ');
 }
 
-function buildAtcEmbed(icao, airport, controllers, relatedEnrouteControllers, usedAipMatch) {
+function buildTopDownBlock(topDownCoverage) {
+    if (!topDownCoverage || !Array.isArray(topDownCoverage.entries) || topDownCoverage.entries.length === 0) {
+        return 'None';
+    }
+
+    return topDownCoverage.entries.map((entry) => {
+        if (entry.status === 'online') {
+            return `• **${entry.label}** — ${formatTopDownControllers(entry.controllers)}`;
+        }
+
+        if (entry.status === 'covered') {
+            return `• **${entry.label}** — covered top-down by ${formatTopDownControllers(entry.controllers)}`;
+        }
+
+        return `• **${entry.label}** — Unstaffed`;
+    }).join('\n');
+}
+
+function buildAtcEmbed(icao, airport, controllerResult, topDownCoverage) {
     const embed = new EmbedBuilder()
         .setColor(ATC_EMBED_COLOUR)
         .setTitle(`${icao} Online ATC`);
@@ -56,27 +78,34 @@ function buildAtcEmbed(icao, airport, controllers, relatedEnrouteControllers, us
         embed.setDescription(truncateText(summaryParts.join(' • '), DESCRIPTION_LIMIT));
     }
 
-    embed.addFields({
-        name: 'Local positions online',
-        value: trimFieldValue(buildControllerBlock(controllers)),
-        inline: false
-    });
+    if (controllerResult.matchSource === 'aip' && topDownCoverage) {
+        embed.addFields(
+            {
+                name: 'Top-down coverage',
+                value: trimFieldValue(buildTopDownBlock(topDownCoverage)),
+                inline: false
+            },
+            {
+                name: 'AIP positions online',
+                value: trimFieldValue(buildControllerBlock(controllerResult.controllers)),
+                inline: false
+            }
+        );
 
-    if (relatedEnrouteControllers.length > 0) {
-        embed.addFields({
-            name: 'Possible area coverage',
-            value: trimFieldValue(buildControllerBlock(relatedEnrouteControllers)),
-            inline: false
+        return embed.setFooter({
+            text: `${controllerResult.controllers.length} AIP position${controllerResult.controllers.length === 1 ? '' : 's'} online • Top-down view`
         });
     }
 
-    const footerParts = [`${controllers.length} local position${controllers.length === 1 ? '' : 's'} online`];
-    if (relatedEnrouteControllers.length > 0) {
-        footerParts.push(`${relatedEnrouteControllers.length} area position${relatedEnrouteControllers.length === 1 ? '' : 's'} matched`);
-    }
-    footerParts.push(usedAipMatch ? 'Matched against VATSIM AIP stations' : 'Fallback airport-prefix match');
+    embed.addFields({
+        name: 'Local positions online',
+        value: trimFieldValue(buildControllerBlock(controllerResult.controllers)),
+        inline: false
+    });
 
-    return embed.setFooter({ text: footerParts.join(' • ') });
+    return embed.setFooter({
+        text: `${controllerResult.controllers.length} position${controllerResult.controllers.length === 1 ? '' : 's'} online • Fallback airport-prefix match`
+    });
 }
 
 module.exports = {
@@ -110,27 +139,20 @@ module.exports = {
             ]);
 
             const controllerResult = getAirportControllerMatchResult(data, icao, airport);
-            const controllers = controllerResult.controllers;
-            const relatedEnrouteControllers = airport
-                ? getRelatedEnrouteControllers(data, icao, airport, controllers)
-                : [];
+            const topDownCoverage = controllerResult.matchSource === 'aip'
+                ? getAirportTopDownCoverage(airport, controllerResult.controllers)
+                : null;
 
-            if (controllers.length === 0 && relatedEnrouteControllers.length === 0) {
+            if (controllerResult.controllers.length === 0) {
                 const sourceDetail = airport
-                    ? 'The airport was found in the VATSIM AIP, but no matching local or area positions are online right now.'
+                    ? 'The airport was found in the VATSIM AIP, but no matching charted positions are online right now.'
                     : 'No airport-specific VATSIM ATC is currently online for this airport.';
                 await interaction.editReply(`${sourceDetail} (${icao})`);
                 return;
             }
 
             await interaction.editReply({
-                embeds: [buildAtcEmbed(
-                    icao,
-                    airport,
-                    controllers,
-                    relatedEnrouteControllers,
-                    controllerResult.matchSource === 'aip'
-                )]
+                embeds: [buildAtcEmbed(icao, airport, controllerResult, topDownCoverage)]
             });
         } catch (error) {
             const status = error.response?.status;
