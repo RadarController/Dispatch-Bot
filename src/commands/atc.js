@@ -9,6 +9,7 @@ const { fetchAirportFromAip } = require('../vatsimAip');
 const ATC_EMBED_COLOUR = 0x1f6feb;
 const FIELD_LIMIT = 1024;
 const DESCRIPTION_LIMIT = 4096;
+const GRAPH_WIDTH = 38;
 
 function truncateText(text, maxLength) {
     const stringValue = String(text || '');
@@ -23,42 +24,94 @@ function trimFieldValue(value) {
     return truncateText(value, FIELD_LIMIT);
 }
 
-function formatControllerLine(controller) {
-    const infoLine = Array.isArray(controller.text_atis) && controller.text_atis.length > 0
-        ? ` — ${truncateText(controller.text_atis[0], 100)}`
-        : '';
-
-    return `• **${controller.callsign}** — ${controller.frequency}${infoLine}`;
-}
-
-function buildControllerBlock(controllers) {
-    if (!Array.isArray(controllers) || controllers.length === 0) {
-        return 'None';
+function centerText(text, width) {
+    const value = String(text || '').trim();
+    if (value.length >= width) {
+        return value.slice(0, width);
     }
 
-    return controllers.map((controller) => formatControllerLine(controller)).join('\n');
+    const totalPadding = width - value.length;
+    const leftPadding = Math.floor(totalPadding / 2);
+    const rightPadding = totalPadding - leftPadding;
+    return `${' '.repeat(leftPadding)}${value}${' '.repeat(rightPadding)}`;
+}
+
+function wrapText(text, width) {
+    const value = String(text || '').trim();
+    if (!value) {
+        return [''];
+    }
+
+    const words = value.split(/\s+/);
+    const lines = [];
+    let current = '';
+
+    for (const word of words) {
+        if (word.length > width) {
+            if (current) {
+                lines.push(current);
+                current = '';
+            }
+
+            for (let index = 0; index < word.length; index += width) {
+                lines.push(word.slice(index, index + width));
+            }
+            continue;
+        }
+
+        const candidate = current ? `${current} ${word}` : word;
+        if (candidate.length <= width) {
+            current = candidate;
+            continue;
+        }
+
+        lines.push(current);
+        current = word;
+    }
+
+    if (current) {
+        lines.push(current);
+    }
+
+    return lines.length > 0 ? lines : [''];
 }
 
 function formatTopDownControllers(controllers) {
-    return controllers.map((controller) => `**${controller.callsign}** (${controller.frequency})`).join(', ');
+    return controllers.map((controller) => `${controller.callsign} (${controller.frequency})`).join(', ');
 }
 
-function buildTopDownBlock(topDownCoverage) {
+function getCoverageText(entry) {
+    if (entry.status === 'online') {
+        return `Online: ${formatTopDownControllers(entry.controllers)}`;
+    }
+
+    if (entry.status === 'covered') {
+        return `Covered by: ${formatTopDownControllers(entry.controllers)}`;
+    }
+
+    return 'Unstaffed';
+}
+
+function buildGraphicalTopDownBlock(topDownCoverage) {
     if (!topDownCoverage || !Array.isArray(topDownCoverage.entries) || topDownCoverage.entries.length === 0) {
         return 'None';
     }
 
-    return topDownCoverage.entries.map((entry) => {
-        if (entry.status === 'online') {
-            return `• **${entry.label}** — ${formatTopDownControllers(entry.controllers)}`;
-        }
+    const lines = [];
+    const border = '─'.repeat(GRAPH_WIDTH);
 
-        if (entry.status === 'covered') {
-            return `• **${entry.label}** — covered top-down by ${formatTopDownControllers(entry.controllers)}`;
-        }
+    topDownCoverage.entries.forEach((entry, index) => {
+        const topBorder = index === 0 ? `┌${border}┐` : `├${border}┤`;
+        lines.push(topBorder);
+        lines.push(`│${centerText(entry.label.toUpperCase(), GRAPH_WIDTH)}│`);
 
-        return `• **${entry.label}** — Unstaffed`;
-    }).join('\n');
+        for (const wrappedLine of wrapText(getCoverageText(entry), GRAPH_WIDTH)) {
+            lines.push(`│${wrappedLine.padEnd(GRAPH_WIDTH, ' ')}│`);
+        }
+    });
+
+    lines.push(`└${border}┘`);
+    return `\`\`\`text\n${lines.join('\n')}\n\`\`\``;
 }
 
 function buildAtcEmbed(icao, airport, controllerResult, topDownCoverage) {
@@ -78,33 +131,18 @@ function buildAtcEmbed(icao, airport, controllerResult, topDownCoverage) {
         embed.setDescription(truncateText(summaryParts.join(' • '), DESCRIPTION_LIMIT));
     }
 
-    if (controllerResult.matchSource === 'aip' && topDownCoverage) {
-        embed.addFields(
-            {
-                name: 'Top-down coverage',
-                value: trimFieldValue(buildTopDownBlock(topDownCoverage)),
-                inline: false
-            },
-            {
-                name: 'AIP positions online',
-                value: trimFieldValue(buildControllerBlock(controllerResult.controllers)),
-                inline: false
-            }
-        );
-
-        return embed.setFooter({
-            text: `${controllerResult.controllers.length} AIP position${controllerResult.controllers.length === 1 ? '' : 's'} online • Top-down view`
-        });
-    }
-
     embed.addFields({
-        name: 'Local positions online',
-        value: trimFieldValue(buildControllerBlock(controllerResult.controllers)),
+        name: 'Top-down coverage',
+        value: trimFieldValue(buildGraphicalTopDownBlock(topDownCoverage)),
         inline: false
     });
 
+    const footerDetail = controllerResult.matchSource === 'aip'
+        ? 'Top-down view'
+        : 'Fallback top-down view';
+
     return embed.setFooter({
-        text: `${controllerResult.controllers.length} position${controllerResult.controllers.length === 1 ? '' : 's'} online • Fallback airport-prefix match`
+        text: `${controllerResult.controllers.length} matched position${controllerResult.controllers.length === 1 ? '' : 's'} online • ${footerDetail}`
     });
 }
 
@@ -139,9 +177,10 @@ module.exports = {
             ]);
 
             const controllerResult = getAirportControllerMatchResult(data, icao, airport);
-            const topDownCoverage = controllerResult.matchSource === 'aip'
-                ? getAirportTopDownCoverage(airport, controllerResult.controllers)
-                : null;
+            const topDownCoverage = getAirportTopDownCoverage(airport, controllerResult.controllers, {
+                matchSource: controllerResult.matchSource,
+                icao
+            });
 
             if (controllerResult.controllers.length === 0) {
                 const sourceDetail = airport

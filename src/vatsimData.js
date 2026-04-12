@@ -230,6 +230,20 @@ function classifyStationLayer(station) {
     return null;
 }
 
+function classifyControllerLayer(controller, airport = null) {
+    if (airport) {
+        const matchedStation = findStationForController(controller, airport);
+        if (matchedStation) {
+            return classifyStationLayer(matchedStation);
+        }
+    }
+
+    return classifyStationLayer({
+        callsign: controller?.callsign,
+        name: Array.isArray(controller?.text_atis) && controller.text_atis.length > 0 ? controller.text_atis[0] : ''
+    });
+}
+
 function getAirportControllerMatchResult(data, icao, airport = null) {
     const normalisedIcao = normaliseIcao(icao);
     const prefix = `${normalisedIcao}_`;
@@ -307,21 +321,35 @@ function buildLayerStationDefinitions(airport) {
     return layerStations;
 }
 
+function buildVisibleFallbackLayers(matchedControllers = []) {
+    const explicitLayerIndexes = matchedControllers
+        .map((controller) => classifyControllerLayer(controller))
+        .map((layerKey) => TOP_DOWN_LAYERS.findIndex((layer) => layer.key === layerKey))
+        .filter((index) => index >= 0);
+
+    if (explicitLayerIndexes.length === 0) {
+        return [];
+    }
+
+    const topmostIndex = Math.min(...explicitLayerIndexes);
+    const explicitHasDirectorFinal = explicitLayerIndexes.includes(TOP_DOWN_LAYERS.findIndex((layer) => layer.key === 'directorFinal'));
+
+    return TOP_DOWN_LAYERS.filter((layer, index) => {
+        if (index < topmostIndex) {
+            return false;
+        }
+
+        if (layer.key === 'directorFinal') {
+            return explicitHasDirectorFinal;
+        }
+
+        return true;
+    });
+}
+
 function findStationForController(controller, airport) {
     const airportTokens = buildAirportTokens(airport?.icao || '', airport);
     return (airport?.stations || []).find((station) => controllerMatchesStation(controller, station, airportTokens)) || null;
-}
-
-function classifyControllerLayer(controller, airport) {
-    const matchedStation = findStationForController(controller, airport);
-    if (matchedStation) {
-        return classifyStationLayer(matchedStation);
-    }
-
-    return classifyStationLayer({
-        callsign: controller?.callsign,
-        name: Array.isArray(controller?.text_atis) && controller.text_atis.length > 0 ? controller.text_atis[0] : ''
-    });
 }
 
 function dedupeControllers(controllers) {
@@ -339,13 +367,14 @@ function dedupeControllers(controllers) {
     return sortControllers([...byCallsign.values()]);
 }
 
-function getAirportTopDownCoverage(airport, matchedControllers = []) {
-    if (!airport || !Array.isArray(airport.stations) || airport.stations.length === 0) {
-        return null;
-    }
-
-    const layerStations = buildLayerStationDefinitions(airport);
-    const visibleLayers = TOP_DOWN_LAYERS.filter((layer) => (layerStations.get(layer.key) || []).length > 0);
+function getAirportTopDownCoverage(airport, matchedControllers = [], options = {}) {
+    const matchSource = options.matchSource || 'aip';
+    const visibleLayers = matchSource === 'aip'
+        ? TOP_DOWN_LAYERS.filter((layer) => {
+            const layerStations = buildLayerStationDefinitions(airport);
+            return (layerStations.get(layer.key) || []).length > 0;
+        })
+        : buildVisibleFallbackLayers(matchedControllers);
 
     if (visibleLayers.length === 0) {
         return null;
@@ -354,7 +383,7 @@ function getAirportTopDownCoverage(airport, matchedControllers = []) {
     const onlineByLayer = new Map(visibleLayers.map((layer) => [layer.key, []]));
 
     for (const controller of matchedControllers) {
-        const layerKey = classifyControllerLayer(controller, airport);
+        const layerKey = classifyControllerLayer(controller, matchSource === 'aip' ? airport : null);
         if (!layerKey || !onlineByLayer.has(layerKey)) {
             continue;
         }
