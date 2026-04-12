@@ -224,39 +224,30 @@ function getAirportControllers(data, icao, airport = null) {
 }
 
 function getRelatedEnrouteControllers(data, icao, airport = null, excludedControllers = []) {
-    if (!airport) {
+    if (!airport || !Array.isArray(airport.stations) || airport.stations.length === 0) {
         return [];
     }
 
     const controllers = Array.isArray(data?.controllers) ? data.controllers : [];
     const excluded = new Set(excludedControllers.map((controller) => normaliseCallsign(controller?.callsign)));
-    const airportTokens = buildAirportTokens(icao, airport);
-    const localStationCallsigns = new Set((airport.stations || []).map((station) => normaliseCallsign(station.callsign)));
     const allowedRoles = new Set(['APP', 'DEP', 'CTR', 'FSS']);
+    const areaStationCallsigns = new Set(
+        airport.stations
+            .map((station) => normaliseCallsign(station?.callsign))
+            .filter((callsign) => callsign && allowedRoles.has(getControllerRole(callsign)))
+    );
+
+    if (areaStationCallsigns.size === 0) {
+        return [];
+    }
 
     return sortControllers(controllers.filter((controller) => {
         const callsign = normaliseCallsign(controller?.callsign);
-        if (!callsign || callsign.endsWith('_ATIS') || excluded.has(callsign) || localStationCallsigns.has(callsign)) {
+        if (!callsign || callsign.endsWith('_ATIS') || excluded.has(callsign)) {
             return false;
         }
 
-        const role = getControllerRole(callsign);
-        if (!allowedRoles.has(role)) {
-            return false;
-        }
-
-        const base = getControllerBase(callsign);
-        if ([...airportTokens].some((token) => tokenLooksRelated(base, token))) {
-            return true;
-        }
-
-        const searchableText = [
-            callsign,
-            controller?.name,
-            ...(Array.isArray(controller?.text_atis) ? controller.text_atis : [])
-        ].join(' ').toUpperCase();
-
-        return [...airportTokens].some((token) => token.length >= 3 && searchableText.includes(token));
+        return areaStationCallsigns.has(callsign);
     }));
 }
 
