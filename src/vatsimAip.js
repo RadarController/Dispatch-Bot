@@ -65,6 +65,14 @@ async function fetchAirportFromAip(icao) {
     const now = Date.now();
     const cached = airportCache.get(normalisedIcao);
     if (cached && (now - cached.cachedAt) < CACHE_MS) {
+        console.log('[ATC_AIP_FETCH]', {
+            icao: normalisedIcao,
+            cached: true,
+            airportFound: Boolean(cached.airport),
+            airportIcao: cached.airport?.icao || null,
+            airportIata: cached.airport?.iata || null,
+            stationCount: cached.airport?.stations?.length || 0
+        });
         return cached.airport;
     }
 
