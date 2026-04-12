@@ -66,6 +66,9 @@ function buildAtcEmbed(icao, airport, controllers, relatedEnrouteControllers, us
     if (relatedEnrouteControllers.length > 0) {
         footerParts.push(`${relatedEnrouteControllers.length} area position${relatedEnrouteControllers.length === 1 ? '' : 's'} matched`);
     }
+    footerParts.push(usedAipMatch ? 'Matched against VATSIM AIP stations' : 'Fallback airport-prefix match');
+
+    return embed.setFooter({ text: footerParts.join(' • ') });
 }
 
 module.exports = {
