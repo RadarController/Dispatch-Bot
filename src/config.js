@@ -8,6 +8,7 @@ const config = {
   discordToken: process.env.DISCORD_TOKEN || '',
   discordClientId: process.env.DISCORD_CLIENT_ID || '',
   discordGuildId: process.env.DISCORD_GUILD_ID || '',
+  databaseUrl: process.env.DATABASE_URL || '',
   metarApiBase: process.env.METAR_API_BASE || '',
   metarApiKey: process.env.METAR_API_KEY || '',
   vatsimDataUrl: process.env.VATSIM_DATA_URL || 'https://data.vatsim.net/v3/vatsim-data.json',
@@ -23,7 +24,6 @@ function getMissingRequiredConfig() {
 
   if (!config.discordToken) missing.push('DISCORD_TOKEN');
   if (!config.discordClientId) missing.push('DISCORD_CLIENT_ID');
-  if (!config.discordGuildId) missing.push('DISCORD_GUILD_ID');
 
   return missing;
 }
