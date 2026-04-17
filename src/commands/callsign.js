@@ -1,4 +1,4 @@
-const { EmbedBuilder, SlashCommandBuilder } = require('discord.js');
+const { EmbedBuilder, MessageFlags, SlashCommandBuilder } = require('discord.js');
 const { fetchVatsimData, findCallsignRecord } = require('../vatsimData');
 
 const LIVE_EMBED_COLOUR = 0x2ea043;
@@ -70,7 +70,7 @@ module.exports = {
         if (!/^[A-Z0-9]{2,10}$/.test(callsign)) {
             await interaction.reply({
                 content: 'Please provide a valid callsign, for example BAW123.',
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
             return;
         }

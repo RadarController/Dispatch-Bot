@@ -1,4 +1,4 @@
-const { SlashCommandBuilder } = require('discord.js');
+const { MessageFlags, SlashCommandBuilder } = require('discord.js');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -8,7 +8,7 @@ module.exports = {
   async execute(interaction) {
     await interaction.reply({
       content: 'Dispatch Bot is online and responding.',
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   }
 };

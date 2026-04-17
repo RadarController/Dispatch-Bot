@@ -1,4 +1,4 @@
-const { EmbedBuilder, SlashCommandBuilder } = require('discord.js');
+const { EmbedBuilder, MessageFlags, SlashCommandBuilder } = require('discord.js');
 const { fetchVatsimData, getAirportAtis } = require('../vatsimData');
 
 const ATIS_EMBED_COLOUR = 0xf59e0b;
@@ -70,7 +70,7 @@ module.exports = {
         if (!/^[A-Z]{4}$/.test(icao)) {
             await interaction.reply({
                 content: 'Please provide a valid four-letter ICAO code.',
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
             return;
         }

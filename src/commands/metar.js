@@ -1,5 +1,5 @@
 const axios = require('axios');
-const { EmbedBuilder, SlashCommandBuilder } = require('discord.js');
+const { EmbedBuilder, MessageFlags, SlashCommandBuilder } = require('discord.js');
 const { config } = require('../config');
 
 const cache = new Map();
@@ -416,7 +416,7 @@ module.exports = {
         if (!/^[A-Z]{4}$/.test(icao)) {
             await interaction.reply({
                 content: 'Please provide a valid four-letter ICAO code.',
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
             return;
         }
@@ -424,7 +424,7 @@ module.exports = {
         if (!config.metarApiBase) {
             await interaction.reply({
                 content: 'METAR is not configured yet. Add METAR_API_BASE in Railway first.',
-                ephemeral: true
+                flags: MessageFlags.Ephemeral
             });
             return;
         }
