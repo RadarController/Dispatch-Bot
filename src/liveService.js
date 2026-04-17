@@ -147,7 +147,7 @@ async function runLiveMonitorTick(client) {
   tickInProgress = true;
 
   try {
-    const state = readStore();
+    const state = await readStore();
     const streamers = Object.values(state.streamers || {});
 
     if (streamers.length === 0) {
@@ -158,7 +158,7 @@ async function runLiveMonitorTick(client) {
       await processStreamer(client, state, streamer);
     }
 
-    writeStore(state);
+    await writeStore(state);
   } catch (error) {
     console.error('Live monitor tick failed:', error);
   } finally {
