@@ -56,10 +56,11 @@ module.exports = {
     ),
 
   async execute(interaction) {
+    const guildId = interaction.guildId;
     const subcommand = interaction.options.getSubcommand();
 
     if (subcommand === 'status') {
-      const liveConfig = getLiveConfig();
+      const liveConfig = await getLiveConfig(guildId);
       await interaction.reply({
         content: [
           '**Live configuration**',
@@ -74,7 +75,7 @@ module.exports = {
 
     if (subcommand === 'set-streamer-role') {
       const role = interaction.options.getRole('role', true);
-      const liveConfig = setLiveConfig({ streamerRoleId: role.id });
+      const liveConfig = await setLiveConfig(guildId, { streamerRoleId: role.id });
       await interaction.reply({
         content: `Streamer role set to ${formatRoleMention(liveConfig.streamerRoleId)}.`,
         ephemeral: true
@@ -84,7 +85,7 @@ module.exports = {
 
     if (subcommand === 'set-alert-role') {
       const role = interaction.options.getRole('role', true);
-      const liveConfig = setLiveConfig({ livePingRoleId: role.id });
+      const liveConfig = await setLiveConfig(guildId, { livePingRoleId: role.id });
       await interaction.reply({
         content: `Live alert role set to ${formatRoleMention(liveConfig.livePingRoleId)}.`,
         ephemeral: true
@@ -93,7 +94,7 @@ module.exports = {
     }
 
     const channel = interaction.options.getChannel('channel', true);
-    const liveConfig = setLiveConfig({ liveAnnouncementsChannelId: channel.id });
+    const liveConfig = await setLiveConfig(guildId, { liveAnnouncementsChannelId: channel.id });
     await interaction.reply({
       content: `Live announcement channel set to ${formatChannelMention(liveConfig.liveAnnouncementsChannelId)}.`,
       ephemeral: true
