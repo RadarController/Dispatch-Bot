@@ -20,6 +20,9 @@ function getDefaultGuildState() {
       channelId: '',
       roleIds: []
     },
+    callsignConfig: {
+      iataMappings: {}
+    },
     streamers: {},
     liveSessions: {}
   };
@@ -66,6 +69,21 @@ function normaliseRoleIds(roleIds) {
   );
 }
 
+function normaliseIataMappings(mappings) {
+  if (!mappings || typeof mappings !== 'object') {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(mappings)
+      .map(([iataDesignator, icaoRoot]) => [
+        `${iataDesignator}`.trim().toUpperCase(),
+        `${icaoRoot}`.trim().toUpperCase()
+      ])
+      .filter(([iataDesignator, icaoRoot]) => /^[A-Z0-9]{2}$/.test(iataDesignator) && /^[A-Z]{3}$/.test(icaoRoot))
+  );
+}
+
 function normaliseGuildState(raw) {
   const defaults = getDefaultGuildState();
 
@@ -78,6 +96,11 @@ function normaliseGuildState(raw) {
       ...defaults.rolePanelConfig,
       ...(raw?.rolePanelConfig || {}),
       roleIds: normaliseRoleIds(raw?.rolePanelConfig?.roleIds || defaults.rolePanelConfig.roleIds)
+    },
+    callsignConfig: {
+      ...defaults.callsignConfig,
+      ...(raw?.callsignConfig || {}),
+      iataMappings: normaliseIataMappings(raw?.callsignConfig?.iataMappings || defaults.callsignConfig.iataMappings)
     },
     streamers: raw?.streamers && typeof raw.streamers === 'object' ? raw.streamers : {},
     liveSessions: raw?.liveSessions && typeof raw.liveSessions === 'object' ? raw.liveSessions : {}
