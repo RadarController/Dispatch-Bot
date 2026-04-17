@@ -1,5 +1,5 @@
 const { startLiveMonitor } = require('../liveService');
-const { ensureRolePanels } = require('../rolesPanel');
+const { ensureRolePanel } = require('../rolesPanel');
 const { REST, Routes } = require('discord.js');
 const { config } = require('../config');
 
@@ -30,6 +30,21 @@ module.exports = async (client) => {
     }
   } catch (error) {
     console.error('Failed to ensure role panels:', error);
+  }
+
+  try {
+    await startLiveMonitor(client);
+  } catch (error) {
+    console.error('Failed to start live monitor:', error);
+  }
+
+  try {
+    const panelMessage = await ensureRolePanel(client);
+    if (panelMessage) {
+      console.log(`Ensured role panel in channel ${panelMessage.channelId}`);
+    }
+  } catch (error) {
+    console.error('Failed to ensure role panel:', error);
   }
 
   try {

@@ -70,7 +70,6 @@ module.exports = {
     ),
 
   async execute(interaction) {
-    const guildId = interaction.guildId;
     const subcommand = interaction.options.getSubcommand();
     const targetUser = interaction.options.getUser('user') || interaction.user;
 
@@ -83,7 +82,7 @@ module.exports = {
     }
 
     if (subcommand === 'list') {
-      const streamer = await getStreamer(guildId, targetUser.id);
+      const streamer = getStreamer(targetUser.id);
       if (!streamer) {
         await interaction.reply({
           content: `<@${targetUser.id}> is not registered as a streamer yet.`,
@@ -108,7 +107,7 @@ module.exports = {
     const platform = interaction.options.getString('platform', true);
 
     if (subcommand === 'remove') {
-      const streamer = await getStreamer(guildId, targetUser.id);
+      const streamer = getStreamer(targetUser.id);
       if (!streamer) {
         await interaction.reply({
           content: `<@${targetUser.id}> is not registered as a streamer yet.`,
@@ -126,7 +125,7 @@ module.exports = {
         return;
       }
 
-      await removeStreamerChannel(guildId, targetUser.id, platform);
+      removeStreamerChannel(targetUser.id, platform);
       await interaction.reply({
         content: `Removed the ${PLATFORM_LABELS[platform]} channel for <@${targetUser.id}>.`,
         ephemeral: true
@@ -147,11 +146,11 @@ module.exports = {
       return;
     }
 
-    if (!await getStreamer(guildId, targetUser.id)) {
-      await upsertStreamer(guildId, targetUser.id, { displayName: getTargetDisplayName(interaction, targetUser) });
+    if (!getStreamer(targetUser.id)) {
+      upsertStreamer(targetUser.id, { displayName: getTargetDisplayName(interaction, targetUser) });
     }
 
-    await setStreamerChannel(guildId, targetUser.id, platform, normalisedChannel);
+    setStreamerChannel(targetUser.id, platform, normalisedChannel);
 
     await interaction.reply({
       content: `Saved the ${PLATFORM_LABELS[platform]} channel for <@${targetUser.id}>: ${normalisedChannel.url}`,

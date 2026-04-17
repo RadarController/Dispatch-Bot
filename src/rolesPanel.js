@@ -4,9 +4,29 @@ const {
   PermissionFlagsBits,
   StringSelectMenuBuilder
 } = require('discord.js');
-const { getDefaultGuildState, readStore, updateStore } = require('./store');
 
 const ROLE_PANEL_CUSTOM_ID_PREFIX = 'dispatch-role-panel';
+
+function getConfiguredRoleIds() {
+  return Array.from(
+    new Set(
+      (process.env.SELF_ASSIGNABLE_ROLE_IDS || '')
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean)
+    )
+  );
+}
+
+function getRolePanelChannelId() {
+  return (process.env.ROLE_PANEL_CHANNEL_ID || '').trim();
+}
+
+function getConfiguredRoles(guild) {
+  return getConfiguredRoleIds()
+    .map((roleId) => guild.roles.cache.get(roleId))
+    .filter((role) => role && !role.managed && role.id !== guild.id);
+}
 
 function formatRoleMentions(roleIds, guild) {
   return roleIds
@@ -18,8 +38,8 @@ function formatRoleMentions(roleIds, guild) {
 function chunkArray(items, size) {
   const chunks = [];
 
-  for (let index = 0; index < items.length; index += size) {
-    chunks.push(items.slice(index, index + size));
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
   }
 
   return chunks;
@@ -33,77 +53,8 @@ function buildRolePanelContent() {
   ].join('\n');
 }
 
-async function getRolePanelConfig(guildId) {
-  const state = await readStore();
-  return state.guilds?.[guildId]?.rolePanelConfig || getDefaultGuildState().rolePanelConfig;
-}
-
-async function updateRolePanelConfig(guildId, updater) {
-  return updateStore((state) => {
-    state.guilds[guildId] = state.guilds[guildId] || getDefaultGuildState();
-    const currentConfig = state.guilds[guildId].rolePanelConfig || getDefaultGuildState().rolePanelConfig;
-    const nextConfig = updater({
-      channelId: currentConfig.channelId || '',
-      roleIds: Array.isArray(currentConfig.roleIds) ? [...currentConfig.roleIds] : []
-    });
-
-    state.guilds[guildId].rolePanelConfig = {
-      channelId: nextConfig.channelId || '',
-      roleIds: Array.from(new Set((nextConfig.roleIds || []).map((value) => `${value}`.trim()).filter(Boolean)))
-    };
-
-    return state.guilds[guildId].rolePanelConfig;
-  });
-}
-
-async function getConfiguredRoleIds(guildId) {
-  const config = await getRolePanelConfig(guildId);
-  return config.roleIds;
-}
-
-async function getRolePanelChannelId(guildId) {
-  const config = await getRolePanelConfig(guildId);
-  return config.channelId || '';
-}
-
-async function getConfiguredRoles(guild) {
-  const roleIds = await getConfiguredRoleIds(guild.id);
-
-  return roleIds
-    .map((roleId) => guild.roles.cache.get(roleId))
-    .filter((role) => role && !role.managed && role.id !== guild.id);
-}
-
-async function addConfiguredRoleId(guildId, roleId) {
-  return updateRolePanelConfig(guildId, (config) => ({
-    ...config,
-    roleIds: [...config.roleIds, roleId]
-  }));
-}
-
-async function removeConfiguredRoleId(guildId, roleId) {
-  return updateRolePanelConfig(guildId, (config) => ({
-    ...config,
-    roleIds: config.roleIds.filter((value) => value !== roleId)
-  }));
-}
-
-async function setRolePanelChannelId(guildId, channelId) {
-  return updateRolePanelConfig(guildId, (config) => ({
-    ...config,
-    channelId
-  }));
-}
-
-async function clearRolePanelConfig(guildId) {
-  return updateRolePanelConfig(guildId, () => ({
-    channelId: '',
-    roleIds: []
-  }));
-}
-
-async function buildRolePanelComponents(guild) {
-  const roleGroups = chunkArray(await getConfiguredRoles(guild), 25);
+function buildRolePanelComponents(guild) {
+  const roleGroups = chunkArray(getConfiguredRoles(guild), 25);
 
   return roleGroups.map((group, index) => {
     const menu = new StringSelectMenuBuilder()
@@ -123,10 +74,10 @@ async function buildRolePanelComponents(guild) {
   });
 }
 
-async function buildRolePanelPayload(guild) {
+function buildRolePanelPayload(guild) {
   return {
     content: buildRolePanelContent(),
-    components: await buildRolePanelComponents(guild)
+    components: buildRolePanelComponents(guild)
   };
 }
 
@@ -143,13 +94,13 @@ function isRolePanelInteraction(interaction) {
   return interaction.isStringSelectMenu() && interaction.customId.startsWith(`${ROLE_PANEL_CUSTOM_ID_PREFIX}:`);
 }
 
-async function getRoleGroupForInteraction(interaction) {
+function getRoleGroupForInteraction(interaction) {
   const index = Number.parseInt(interaction.customId.split(':')[1] || '', 10);
   if (!Number.isInteger(index) || index < 0) {
     return [];
   }
 
-  return chunkArray(await getConfiguredRoles(interaction.guild), 25)[index] || [];
+  return chunkArray(getConfiguredRoles(interaction.guild), 25)[index] || [];
 }
 
 async function getBotMember(guild) {
@@ -173,25 +124,21 @@ function getManageabilityProblems(botMember, roles) {
   return problems;
 }
 
-async function ensureRolePanel(client, guildId) {
-  const channelId = await getRolePanelChannelId(guildId);
+async function ensureRolePanel(client) {
+  const channelId = getRolePanelChannelId();
   if (!channelId) {
     return null;
   }
 
   const channel = await client.channels.fetch(channelId).catch(() => null);
   if (!channel || !channel.isTextBased() || channel.type === ChannelType.DM) {
-    console.error(`Configured role panel channel ${channelId} is not a valid guild text channel.`);
+    console.error(`ROLE_PANEL_CHANNEL_ID ${channelId} is not a valid guild text channel.`);
     return null;
   }
 
-  if (channel.guild.id !== guildId) {
-    console.error(`Configured role panel channel ${channelId} does not belong to guild ${guildId}.`);
-    return null;
-  }
-
-  const payload = await buildRolePanelPayload(channel.guild);
+  const payload = buildRolePanelPayload(channel.guild);
   if (payload.components.length === 0) {
+    console.error('Role panel was requested, but no self-assignable roles are configured.');
     return null;
   }
 
@@ -213,25 +160,8 @@ async function ensureRolePanel(client, guildId) {
   return panelMessage;
 }
 
-async function ensureRolePanels(client) {
-  let refreshedPanels = 0;
-
-  for (const guildId of client.guilds.cache.keys()) {
-    const message = await ensureRolePanel(client, guildId).catch((error) => {
-      console.error(`Failed to ensure role panel for guild ${guildId}:`, error);
-      return null;
-    });
-
-    if (message) {
-      refreshedPanels += 1;
-    }
-  }
-
-  return refreshedPanels;
-}
-
 async function handleRolePanelInteraction(interaction) {
-  const roleGroup = await getRoleGroupForInteraction(interaction);
+  const roleGroup = getRoleGroupForInteraction(interaction);
 
   if (roleGroup.length === 0) {
     await interaction.reply({
@@ -291,17 +221,11 @@ async function handleRolePanelInteraction(interaction) {
 }
 
 module.exports = {
-  addConfiguredRoleId,
-  clearRolePanelConfig,
   ensureRolePanel,
-  ensureRolePanels,
   formatRoleMentions,
   getConfiguredRoleIds,
   getConfiguredRoles,
   getRolePanelChannelId,
-  getRolePanelConfig,
   handleRolePanelInteraction,
-  isRolePanelInteraction,
-  removeConfiguredRoleId,
-  setRolePanelChannelId
+  isRolePanelInteraction
 };

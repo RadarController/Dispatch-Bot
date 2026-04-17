@@ -61,7 +61,7 @@ function buildAnnouncementPayload(streamer, liveConfig, session, includePing) {
   };
 }
 
-async function getAnnouncementChannel(client, guildId, channelId) {
+async function getAnnouncementChannel(client, channelId) {
   if (!channelId) {
     return null;
   }
@@ -71,16 +71,12 @@ async function getAnnouncementChannel(client, guildId, channelId) {
     return null;
   }
 
-  if (channel.guild.id !== guildId) {
-    return null;
-  }
-
   return channel;
 }
 
-async function processStreamer(client, guildId, guildState, streamer) {
-  const liveConfig = guildState.liveConfig || {};
-  const announcementChannel = await getAnnouncementChannel(client, guildId, liveConfig.liveAnnouncementsChannelId);
+async function processStreamer(client, state, streamer) {
+  const liveConfig = state.liveConfig || {};
+  const announcementChannel = await getAnnouncementChannel(client, liveConfig.liveAnnouncementsChannelId);
 
   if (!announcementChannel) {
     return;
@@ -96,11 +92,11 @@ async function processStreamer(client, guildId, guildState, streamer) {
   }
 
   const isActive = hasAnyLivePlatform(platformStates);
-  const existingSession = guildState.liveSessions[streamer.discordUserId] || null;
+  const existingSession = state.liveSessions[streamer.discordUserId] || null;
 
   if (!isActive) {
     if (existingSession) {
-      delete guildState.liveSessions[streamer.discordUserId];
+      delete state.liveSessions[streamer.discordUserId];
     }
     return;
   }
@@ -140,7 +136,7 @@ async function processStreamer(client, guildId, guildState, streamer) {
   }
 
   nextSession.lastAnnouncementHash = nextHash;
-  guildState.liveSessions[streamer.discordUserId] = nextSession;
+  state.liveSessions[streamer.discordUserId] = nextSession;
 }
 
 async function runLiveMonitorTick(client) {
@@ -151,22 +147,18 @@ async function runLiveMonitorTick(client) {
   tickInProgress = true;
 
   try {
-    const state = await readStore();
-    const guildEntries = Object.entries(state.guilds || {});
+    const state = readStore();
+    const streamers = Object.values(state.streamers || {});
 
-    if (guildEntries.length === 0) {
+    if (streamers.length === 0) {
       return;
     }
 
-    for (const [guildId, guildState] of guildEntries) {
-      const streamers = Object.values(guildState.streamers || {});
-
-      for (const streamer of streamers) {
-        await processStreamer(client, guildId, guildState, streamer);
-      }
+    for (const streamer of streamers) {
+      await processStreamer(client, state, streamer);
     }
 
-    await writeStore(state);
+    writeStore(state);
   } catch (error) {
     console.error('Live monitor tick failed:', error);
   } finally {

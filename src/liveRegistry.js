@@ -1,5 +1,5 @@
 const { PLATFORMS } = require('./liveProviders');
-const { getDefaultGuildState, readStore, updateStore } = require('./store');
+const { readStore, updateStore } = require('./store');
 
 function createEmptyChannels() {
   return Object.fromEntries(PLATFORMS.map((platform) => [platform, null]));
@@ -18,46 +18,38 @@ function normaliseStreamerRecord(record, discordUserId) {
   };
 }
 
-async function getGuildState(guildId) {
-  const state = await readStore();
-  return state.guilds?.[guildId] || getDefaultGuildState();
+function getLiveConfig() {
+  return readStore().liveConfig;
 }
 
-async function getLiveConfig(guildId) {
-  return (await getGuildState(guildId)).liveConfig;
-}
-
-async function setLiveConfig(guildId, patch) {
+function setLiveConfig(patch) {
   return updateStore((state) => {
-    state.guilds[guildId] = state.guilds[guildId] || getDefaultGuildState();
-    state.guilds[guildId].liveConfig = {
-      ...state.guilds[guildId].liveConfig,
+    state.liveConfig = {
+      ...state.liveConfig,
       ...patch
     };
 
-    return state.guilds[guildId].liveConfig;
+    return state.liveConfig;
   });
 }
 
-async function listStreamers(guildId) {
-  const guildState = await getGuildState(guildId);
+function listStreamers() {
+  const state = readStore();
 
-  return Object.entries(guildState.streamers)
+  return Object.entries(state.streamers)
     .map(([discordUserId, record]) => normaliseStreamerRecord(record, discordUserId))
-    .sort((left, right) => left.discordUserId.localeCompare(right.discordUserId));
+    .sort((a, b) => a.discordUserId.localeCompare(b.discordUserId));
 }
 
-async function getStreamer(guildId, discordUserId) {
-  const guildState = await getGuildState(guildId);
-  const record = guildState.streamers[discordUserId];
+function getStreamer(discordUserId) {
+  const state = readStore();
+  const record = state.streamers[discordUserId];
   return record ? normaliseStreamerRecord(record, discordUserId) : null;
 }
 
-async function upsertStreamer(guildId, discordUserId, patch = {}) {
+function upsertStreamer(discordUserId, patch = {}) {
   return updateStore((state) => {
-    state.guilds[guildId] = state.guilds[guildId] || getDefaultGuildState();
-
-    const existing = normaliseStreamerRecord(state.guilds[guildId].streamers[discordUserId], discordUserId);
+    const existing = normaliseStreamerRecord(state.streamers[discordUserId], discordUserId);
     const next = {
       ...existing,
       ...patch,
@@ -70,53 +62,47 @@ async function upsertStreamer(guildId, discordUserId, patch = {}) {
       updatedAt: new Date().toISOString()
     };
 
-    state.guilds[guildId].streamers[discordUserId] = next;
+    state.streamers[discordUserId] = next;
     return next;
   });
 }
 
-async function removeStreamer(guildId, discordUserId) {
+function removeStreamer(discordUserId) {
   return updateStore((state) => {
-    state.guilds[guildId] = state.guilds[guildId] || getDefaultGuildState();
-
-    const existing = state.guilds[guildId].streamers[discordUserId]
-      ? normaliseStreamerRecord(state.guilds[guildId].streamers[discordUserId], discordUserId)
+    const existing = state.streamers[discordUserId]
+      ? normaliseStreamerRecord(state.streamers[discordUserId], discordUserId)
       : null;
 
-    delete state.guilds[guildId].streamers[discordUserId];
-    delete state.guilds[guildId].liveSessions[discordUserId];
+    delete state.streamers[discordUserId];
+    delete state.liveSessions[discordUserId];
 
     return existing;
   });
 }
 
-async function setStreamerChannel(guildId, discordUserId, platform, channel) {
+function setStreamerChannel(discordUserId, platform, channel) {
   if (!PLATFORMS.includes(platform)) {
     throw new Error(`Unsupported platform: ${platform}`);
   }
 
   return updateStore((state) => {
-    state.guilds[guildId] = state.guilds[guildId] || getDefaultGuildState();
-
-    const existing = normaliseStreamerRecord(state.guilds[guildId].streamers[discordUserId], discordUserId);
+    const existing = normaliseStreamerRecord(state.streamers[discordUserId], discordUserId);
     existing.channels[platform] = channel;
     existing.addedAt = existing.addedAt || new Date().toISOString();
     existing.updatedAt = new Date().toISOString();
-    state.guilds[guildId].streamers[discordUserId] = existing;
+    state.streamers[discordUserId] = existing;
     return existing;
   });
 }
 
-async function removeStreamerChannel(guildId, discordUserId, platform) {
+function removeStreamerChannel(discordUserId, platform) {
   if (!PLATFORMS.includes(platform)) {
     throw new Error(`Unsupported platform: ${platform}`);
   }
 
   return updateStore((state) => {
-    state.guilds[guildId] = state.guilds[guildId] || getDefaultGuildState();
-
-    const existing = state.guilds[guildId].streamers[discordUserId]
-      ? normaliseStreamerRecord(state.guilds[guildId].streamers[discordUserId], discordUserId)
+    const existing = state.streamers[discordUserId]
+      ? normaliseStreamerRecord(state.streamers[discordUserId], discordUserId)
       : null;
 
     if (!existing) {
@@ -125,28 +111,26 @@ async function removeStreamerChannel(guildId, discordUserId, platform) {
 
     existing.channels[platform] = null;
     existing.updatedAt = new Date().toISOString();
-    state.guilds[guildId].streamers[discordUserId] = existing;
+    state.streamers[discordUserId] = existing;
     return existing;
   });
 }
 
-async function getLiveSession(guildId, discordUserId) {
-  return (await getGuildState(guildId)).liveSessions[discordUserId] || null;
+function getLiveSession(discordUserId) {
+  return readStore().liveSessions[discordUserId] || null;
 }
 
-async function setLiveSession(guildId, discordUserId, session) {
+function setLiveSession(discordUserId, session) {
   return updateStore((state) => {
-    state.guilds[guildId] = state.guilds[guildId] || getDefaultGuildState();
-    state.guilds[guildId].liveSessions[discordUserId] = session;
-    return state.guilds[guildId].liveSessions[discordUserId];
+    state.liveSessions[discordUserId] = session;
+    return state.liveSessions[discordUserId];
   });
 }
 
-async function clearLiveSession(guildId, discordUserId) {
+function clearLiveSession(discordUserId) {
   return updateStore((state) => {
-    state.guilds[guildId] = state.guilds[guildId] || getDefaultGuildState();
-    const existing = state.guilds[guildId].liveSessions[discordUserId] || null;
-    delete state.guilds[guildId].liveSessions[discordUserId];
+    const existing = state.liveSessions[discordUserId] || null;
+    delete state.liveSessions[discordUserId];
     return existing;
   });
 }

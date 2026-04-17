@@ -1,19 +1,13 @@
 const {
-  ChannelType,
-  PermissionFlagsBits,
-  SlashCommandBuilder
+  SlashCommandBuilder,
+  PermissionFlagsBits
 } = require('discord.js');
 const {
-  addConfiguredRoleId,
-  clearRolePanelConfig,
   ensureRolePanel,
   formatRoleMentions,
   getConfiguredRoleIds,
   getConfiguredRoles,
-  getRolePanelChannelId,
-  getRolePanelConfig,
-  removeConfiguredRoleId,
-  setRolePanelChannelId
+  getRolePanelChannelId
 } = require('../rolesPanel');
 
 async function getGuildMember(interaction) {
@@ -22,16 +16,6 @@ async function getGuildMember(interaction) {
 
 async function getBotMember(interaction) {
   return interaction.guild.members.fetchMe();
-}
-
-function buildRoleConfigStatus(config, guild) {
-  const roleMentions = formatRoleMentions(config.roleIds || [], guild);
-
-  return [
-    '**Role panel configuration**',
-    `Panel channel: ${config.channelId ? `<#${config.channelId}>` : 'Not configured'}`,
-    `Self-assignable roles: ${roleMentions.length > 0 ? roleMentions.join(', ') : 'None configured'}`
-  ].join('\n');
 }
 
 module.exports = {
@@ -81,142 +65,20 @@ module.exports = {
       subcommand
         .setName('panel')
         .setDescription('Create or refresh the managed role panel in the configured channel.')
-    )
-    .addSubcommand((subcommand) =>
-      subcommand
-        .setName('config-status')
-        .setDescription('Show the current role panel configuration for this server.')
-    )
-    .addSubcommand((subcommand) =>
-      subcommand
-        .setName('config-set-channel')
-        .setDescription('Set the channel used for the managed role panel in this server.')
-        .addChannelOption((option) =>
-          option
-            .setName('channel')
-            .setDescription('Role panel channel')
-            .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
-            .setRequired(true)
-        )
-    )
-    .addSubcommand((subcommand) =>
-      subcommand
-        .setName('config-add-role')
-        .setDescription('Add a self-assignable role for this server.')
-        .addRoleOption((option) =>
-          option
-            .setName('role')
-            .setDescription('Role to make self-assignable')
-            .setRequired(true)
-        )
-    )
-    .addSubcommand((subcommand) =>
-      subcommand
-        .setName('config-remove-role')
-        .setDescription('Remove a self-assignable role for this server.')
-        .addRoleOption((option) =>
-          option
-            .setName('role')
-            .setDescription('Role to remove from the self-assignable list')
-            .setRequired(true)
-        )
-    )
-    .addSubcommand((subcommand) =>
-      subcommand
-        .setName('config-clear')
-        .setDescription('Clear the role panel channel and self-assignable roles for this server.')
     ),
 
   async execute(interaction) {
-    const guildId = interaction.guildId;
-    const subcommand = interaction.options.getSubcommand();
-
-    if (subcommand.startsWith('config-')) {
-      if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageRoles)) {
-        await interaction.reply({
-          content: 'You need the Manage Roles permission to change the role panel configuration.',
-          ephemeral: true
-        });
-        return;
-      }
-
-      if (subcommand === 'config-status') {
-        const config = await getRolePanelConfig(guildId);
-        await interaction.reply({
-          content: buildRoleConfigStatus(config, interaction.guild),
-          ephemeral: true
-        });
-        return;
-      }
-
-      if (subcommand === 'config-set-channel') {
-        const channel = interaction.options.getChannel('channel', true);
-        const config = await setRolePanelChannelId(guildId, channel.id);
-
-        await ensureRolePanel(interaction.client, guildId).catch(() => null);
-
-        await interaction.reply({
-          content: [
-            `Role panel channel set to <#${config.channelId}>.`,
-            buildRoleConfigStatus(config, interaction.guild)
-          ].join('\n\n'),
-          ephemeral: true
-        });
-        return;
-      }
-
-      if (subcommand === 'config-add-role') {
-        const role = interaction.options.getRole('role', true);
-        const config = await addConfiguredRoleId(guildId, role.id);
-
-        await ensureRolePanel(interaction.client, guildId).catch(() => null);
-
-        await interaction.reply({
-          content: [
-            `Added ${role} to the self-assignable role list.`,
-            buildRoleConfigStatus(config, interaction.guild)
-          ].join('\n\n'),
-          ephemeral: true
-        });
-        return;
-      }
-
-      if (subcommand === 'config-remove-role') {
-        const role = interaction.options.getRole('role', true);
-        const config = await removeConfiguredRoleId(guildId, role.id);
-
-        await ensureRolePanel(interaction.client, guildId).catch(() => null);
-
-        await interaction.reply({
-          content: [
-            `Removed ${role} from the self-assignable role list.`,
-            buildRoleConfigStatus(config, interaction.guild)
-          ].join('\n\n'),
-          ephemeral: true
-        });
-        return;
-      }
-
-      const config = await clearRolePanelConfig(guildId);
-      await interaction.reply({
-        content: [
-          'Cleared the role panel configuration for this server.',
-          buildRoleConfigStatus(config, interaction.guild)
-        ].join('\n\n'),
-        ephemeral: true
-      });
-      return;
-    }
-
-    const configuredRoleIds = await getConfiguredRoleIds(guildId);
+    const configuredRoleIds = getConfiguredRoleIds();
 
     if (configuredRoleIds.length === 0) {
       await interaction.reply({
-        content: 'No self-assignable roles are configured yet. Use `/roles config-add-role` first.',
+        content: 'No self-assignable roles are configured yet. Add SELF_ASSIGNABLE_ROLE_IDS in Railway first.',
         ephemeral: true
       });
       return;
     }
+
+    const subcommand = interaction.options.getSubcommand();
 
     if (subcommand === 'panel') {
       if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageRoles)) {
@@ -227,19 +89,19 @@ module.exports = {
         return;
       }
 
-      const channelId = await getRolePanelChannelId(guildId);
+      const channelId = getRolePanelChannelId();
       if (!channelId) {
         await interaction.reply({
-          content: 'No role panel channel is configured yet. Use `/roles config-set-channel` first.',
+          content: 'ROLE_PANEL_CHANNEL_ID is not configured yet in Railway.',
           ephemeral: true
         });
         return;
       }
 
-      const message = await ensureRolePanel(interaction.client, guildId);
+      const message = await ensureRolePanel(interaction.client);
       if (!message) {
         await interaction.reply({
-          content: 'I could not create or refresh the role panel. Check the configured channel, roles, and bot permissions.',
+          content: 'I could not create or refresh the role panel. Check the configured channel and bot permissions.',
           ephemeral: true
         });
         return;
@@ -252,7 +114,7 @@ module.exports = {
       return;
     }
 
-    const configuredRoles = await getConfiguredRoles(interaction.guild);
+    const configuredRoles = getConfiguredRoles(interaction.guild);
 
     if (subcommand === 'list') {
       const roleMentions = formatRoleMentions(configuredRoles.map((role) => role.id), interaction.guild);

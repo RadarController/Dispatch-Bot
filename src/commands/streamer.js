@@ -1,8 +1,8 @@
 const { PermissionFlagsBits, SlashCommandBuilder } = require('discord.js');
 const { getLiveConfig, listStreamers, removeStreamer, upsertStreamer } = require('../liveRegistry');
 
-async function syncStreamerRole(guild, guildId, userId, shouldHaveRole) {
-  const liveConfig = await getLiveConfig(guildId);
+async function syncStreamerRole(guild, userId, shouldHaveRole) {
+  const liveConfig = getLiveConfig();
 
   if (!liveConfig.streamerRoleId) {
     return 'Streamer role is not configured yet.';
@@ -84,11 +84,10 @@ module.exports = {
     ),
 
   async execute(interaction) {
-    const guildId = interaction.guildId;
     const subcommand = interaction.options.getSubcommand();
 
     if (subcommand === 'list') {
-      const streamers = await listStreamers(guildId);
+      const streamers = listStreamers();
       await interaction.reply({
         content: streamers.length > 0
           ? ['**Registered streamers**', ...streamers.map((streamer) => {
@@ -116,8 +115,8 @@ module.exports = {
         targetUser.globalName ||
         targetUser.username;
 
-      const streamer = await upsertStreamer(guildId, targetUser.id, { displayName });
-      const roleMessage = await syncStreamerRole(interaction.guild, guildId, targetUser.id, true);
+      const streamer = upsertStreamer(targetUser.id, { displayName });
+      const roleMessage = await syncStreamerRole(interaction.guild, targetUser.id, true);
 
       await interaction.reply({
         content: [
@@ -129,7 +128,7 @@ module.exports = {
       return;
     }
 
-    const removed = await removeStreamer(guildId, targetUser.id);
+    const removed = removeStreamer(targetUser.id);
     if (!removed) {
       await interaction.reply({
         content: `<@${targetUser.id}> is not currently registered as a streamer.`,
@@ -138,7 +137,7 @@ module.exports = {
       return;
     }
 
-    const roleMessage = await syncStreamerRole(interaction.guild, guildId, targetUser.id, false);
+    const roleMessage = await syncStreamerRole(interaction.guild, targetUser.id, false);
     await interaction.reply({
       content: [
         `Removed <@${targetUser.id}> from the streamer registry.`,
