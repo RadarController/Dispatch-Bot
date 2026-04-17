@@ -37,7 +37,7 @@ async function registerCommands(client) {
   console.log(`Registered ${client.commands.size} global command(s).`);
 }
 
-// bit above is temp
+// bit above is temp ok
 
 module.exports = async (client) => {
   console.log(`Logged in as ${client.user.tag}`);
