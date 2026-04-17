@@ -1,4 +1,4 @@
-const { ChannelType, PermissionFlagsBits, SlashCommandBuilder } = require('discord.js');
+const { ChannelType, MessageFlags, PermissionFlagsBits, SlashCommandBuilder } = require('discord.js');
 const { getLiveConfig, setLiveConfig } = require('../liveRegistry');
 
 function formatRoleMention(roleId) {
@@ -68,7 +68,7 @@ module.exports = {
           `Alert role: ${formatRoleMention(liveConfig.livePingRoleId)}`,
           `Announcement channel: ${formatChannelMention(liveConfig.liveAnnouncementsChannelId)}`
         ].join('\n'),
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -78,7 +78,7 @@ module.exports = {
       const liveConfig = await setLiveConfig(guildId, { streamerRoleId: role.id });
       await interaction.reply({
         content: `Streamer role set to ${formatRoleMention(liveConfig.streamerRoleId)}.`,
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -88,7 +88,7 @@ module.exports = {
       const liveConfig = await setLiveConfig(guildId, { livePingRoleId: role.id });
       await interaction.reply({
         content: `Live alert role set to ${formatRoleMention(liveConfig.livePingRoleId)}.`,
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -97,7 +97,7 @@ module.exports = {
     const liveConfig = await setLiveConfig(guildId, { liveAnnouncementsChannelId: channel.id });
     await interaction.reply({
       content: `Live announcement channel set to ${formatChannelMention(liveConfig.liveAnnouncementsChannelId)}.`,
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   }
 };

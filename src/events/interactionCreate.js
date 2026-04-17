@@ -1,3 +1,4 @@
+const { MessageFlags } = require('discord.js');
 const { handleRolePanelInteraction, isRolePanelInteraction } = require('../rolesPanel');
 
 module.exports = async (interaction, client) => {
@@ -9,7 +10,7 @@ module.exports = async (interaction, client) => {
 
       const payload = {
         content: 'Something went wrong while updating your roles.',
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       };
 
       if (interaction.deferred || interaction.replied) {
@@ -32,7 +33,7 @@ module.exports = async (interaction, client) => {
   if (!command) {
     await interaction.reply({
       content: 'That command is not available right now.',
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
     return;
   }
@@ -44,7 +45,7 @@ module.exports = async (interaction, client) => {
 
     const payload = {
       content: 'Something went wrong while running that command.',
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     };
 
     if (interaction.deferred || interaction.replied) {
