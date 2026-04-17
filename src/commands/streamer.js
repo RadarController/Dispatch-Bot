@@ -1,8 +1,8 @@
-const { PermissionFlagsBits, SlashCommandBuilder } = require('discord.js');
+const { MessageFlags, PermissionFlagsBits, SlashCommandBuilder } = require('discord.js');
 const { getLiveConfig, listStreamers, removeStreamer, upsertStreamer } = require('../liveRegistry');
 
-async function syncStreamerRole(guild, userId, shouldHaveRole) {
-  const liveConfig = getLiveConfig();
+async function syncStreamerRole(guild, guildId, userId, shouldHaveRole) {
+  const liveConfig = await getLiveConfig(guildId);
 
   if (!liveConfig.streamerRoleId) {
     return 'Streamer role is not configured yet.';
@@ -84,10 +84,11 @@ module.exports = {
     ),
 
   async execute(interaction) {
+    const guildId = interaction.guildId;
     const subcommand = interaction.options.getSubcommand();
 
     if (subcommand === 'list') {
-      const streamers = listStreamers();
+      const streamers = await listStreamers(guildId);
       await interaction.reply({
         content: streamers.length > 0
           ? ['**Registered streamers**', ...streamers.map((streamer) => {
@@ -95,7 +96,7 @@ module.exports = {
               return `- <@${streamer.discordUserId}> (${streamer.displayName || 'No display name set'}) — ${platformCount} linked channel(s)`;
             })].join('\n')
           : 'No streamers are registered yet.',
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -104,7 +105,7 @@ module.exports = {
     if (!canManageTarget(interaction, targetUser)) {
       await interaction.reply({
         content: 'You can only manage your own streamer record unless you have Manage Server permission.',
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -115,35 +116,35 @@ module.exports = {
         targetUser.globalName ||
         targetUser.username;
 
-      const streamer = upsertStreamer(targetUser.id, { displayName });
-      const roleMessage = await syncStreamerRole(interaction.guild, targetUser.id, true);
+      const streamer = await upsertStreamer(guildId, targetUser.id, { displayName });
+      const roleMessage = await syncStreamerRole(interaction.guild, guildId, targetUser.id, true);
 
       await interaction.reply({
         content: [
           `Registered <@${streamer.discordUserId}> as a streamer.`,
           roleMessage
         ].join('\n'),
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
 
-    const removed = removeStreamer(targetUser.id);
+    const removed = await removeStreamer(guildId, targetUser.id);
     if (!removed) {
       await interaction.reply({
         content: `<@${targetUser.id}> is not currently registered as a streamer.`,
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
 
-    const roleMessage = await syncStreamerRole(interaction.guild, targetUser.id, false);
+    const roleMessage = await syncStreamerRole(interaction.guild, guildId, targetUser.id, false);
     await interaction.reply({
       content: [
         `Removed <@${targetUser.id}> from the streamer registry.`,
         roleMessage
       ].join('\n'),
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   }
 };

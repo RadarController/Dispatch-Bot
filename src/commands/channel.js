@@ -1,4 +1,4 @@
-const { PermissionFlagsBits, SlashCommandBuilder } = require('discord.js');
+const { MessageFlags, PermissionFlagsBits, SlashCommandBuilder } = require('discord.js');
 const { getStreamer, removeStreamerChannel, setStreamerChannel, upsertStreamer } = require('../liveRegistry');
 const { normaliseChannelInput, PLATFORM_LABELS, PLATFORMS } = require('../liveProviders');
 
@@ -70,23 +70,24 @@ module.exports = {
     ),
 
   async execute(interaction) {
+    const guildId = interaction.guildId;
     const subcommand = interaction.options.getSubcommand();
     const targetUser = interaction.options.getUser('user') || interaction.user;
 
     if (!canManageTarget(interaction, targetUser)) {
       await interaction.reply({
         content: 'You can only manage your own linked channels unless you have Manage Server permission.',
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
 
     if (subcommand === 'list') {
-      const streamer = getStreamer(targetUser.id);
+      const streamer = await getStreamer(guildId, targetUser.id);
       if (!streamer) {
         await interaction.reply({
           content: `<@${targetUser.id}> is not registered as a streamer yet.`,
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
         return;
       }
@@ -99,7 +100,7 @@ module.exports = {
 
       await interaction.reply({
         content: lines.join('\n'),
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -107,11 +108,11 @@ module.exports = {
     const platform = interaction.options.getString('platform', true);
 
     if (subcommand === 'remove') {
-      const streamer = getStreamer(targetUser.id);
+      const streamer = await getStreamer(guildId, targetUser.id);
       if (!streamer) {
         await interaction.reply({
           content: `<@${targetUser.id}> is not registered as a streamer yet.`,
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
         return;
       }
@@ -120,15 +121,15 @@ module.exports = {
       if (!existingChannel?.url) {
         await interaction.reply({
           content: `${PLATFORM_LABELS[platform]} is not currently linked for <@${targetUser.id}>.`,
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
         return;
       }
 
-      removeStreamerChannel(targetUser.id, platform);
+      await removeStreamerChannel(guildId, targetUser.id, platform);
       await interaction.reply({
         content: `Removed the ${PLATFORM_LABELS[platform]} channel for <@${targetUser.id}>.`,
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -141,20 +142,20 @@ module.exports = {
     } catch (error) {
       await interaction.reply({
         content: error.message || 'That channel URL is not valid.',
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
 
-    if (!getStreamer(targetUser.id)) {
-      upsertStreamer(targetUser.id, { displayName: getTargetDisplayName(interaction, targetUser) });
+    if (!await getStreamer(guildId, targetUser.id)) {
+      await upsertStreamer(guildId, targetUser.id, { displayName: getTargetDisplayName(interaction, targetUser) });
     }
 
-    setStreamerChannel(targetUser.id, platform, normalisedChannel);
+    await setStreamerChannel(guildId, targetUser.id, platform, normalisedChannel);
 
     await interaction.reply({
       content: `Saved the ${PLATFORM_LABELS[platform]} channel for <@${targetUser.id}>: ${normalisedChannel.url}`,
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
   }
 };
