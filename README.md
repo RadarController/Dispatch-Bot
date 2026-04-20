@@ -12,23 +12,48 @@ Aviation-themed Discord operations bot for stream notifications, community manag
 
 ---
 
-### VATSIM / Aviation Utilities
+### Status / Diagnostics
 
-- `/atis <icao>`  
-  Show the current VATSIM arrival, departure, or general ATIS for a four-letter ICAO airport code.  
-  Example: `/atis EGCC`
+- `/status bot`  
+  Show Dispatch Bot runtime health, store status, live monitor status, and configured integrations.
 
-- `/metar <icao>`  
-  Get the latest METAR for a four-letter ICAO airport code.  
-  Example: `/metar EGLL`
+- `/status guild`  
+  Show this server’s configured feature status, including live announcements, welcome messages, and role panel setup.
 
-- `/atc <icao>`  
-  List online VATSIM ATC for an airport ICAO code, including top-down coverage where applicable.  
-  Example: `/atc EHAM`
+- `/status live`  
+  Show the live monitor status for this server, including currently active live sessions.
+
+---
+
+### Airport / Aviation Utilities
+
+- `/airport <icao>`  
+  Show a combined airport panel for a four-letter ICAO airport code, including METAR, ATIS, ATC, and quick links to ChartFox and VATSIM Radar.  
+  Example: `/airport EGCC`
+
+- `/airport <icao> [section]`  
+  Show a focused airport panel for one section only.  
+  Supported sections: `overview`, `metar`, `atis`, `atc`, `charts`  
+  Examples:  
+  - `/airport EGCC metar`  
+  - `/airport EGLL atis`  
+  - `/airport EHAM atc`  
+  - `/airport KJFK charts`
 
 - `/callsign <callsign>`  
   Show the aircraft type and filed route for a VATSIM callsign.  
   Example: `/callsign BAW123`
+
+#### Deprecated commands
+
+- `/atis <icao>`  
+  Deprecated. Returns a panel telling users to use `/airport`.
+
+- `/metar <icao>`  
+  Deprecated. Returns a panel telling users to use `/airport`.
+
+- `/atc <icao>`  
+  Deprecated. Returns a panel telling users to use `/airport`.
 
 ---
 
@@ -164,7 +189,7 @@ Aviation-themed Discord operations bot for stream notifications, community manag
 
 ## Permission Notes
 
-- `/liveconfig`, `/callsignconfig`, and `/welcome` are server-management commands intended for members with **Manage Server** permission.
+- `/status`, `/liveconfig`, `/callsignconfig`, and `/welcome` are server-management commands intended for members with **Manage Server** permission.
 - `/roles` configuration and panel management require **Manage Roles** permission.
 - `/streamer` and `/channel` can be used on your own record, or on other users if you have **Manage Server** permission.
 
@@ -173,3 +198,4 @@ Aviation-themed Discord operations bot for stream notifications, community manag
 - Welcome messages rely on the Discord `guildMemberAdd` event.
 - The bot must have `GatewayIntentBits.GuildMembers` enabled in code.
 - **Server Members Intent** must also be enabled in the Discord Developer Portal under **Bot > Privileged Gateway Intents**.
+- The combined `/airport` command includes fixed link buttons for **Charts** (ChartFox) and **Radar** (VATSIM Radar) on airport panels.
