@@ -1,9 +1,7 @@
-const { startLiveMonitor } = require('../liveService');
-const { ensureRolePanels } = require('../rolesPanel');
 const { REST, Routes } = require('discord.js');
 const { config } = require('../config');
 
- async function registerGlobalCommands(client) {
+async function registerGlobalCommands(client) {
   const commands = Array.from(client.commands.values()).map((command) => command.data.toJSON());
   const rest = new REST({ version: '10' }).setToken(config.discordToken);
 
@@ -24,6 +22,7 @@ module.exports = async (client) => {
   }
 
   try {
+    const { ensureRolePanels } = require('../rolesPanel');
     const refreshedPanels = await ensureRolePanels(client);
     if (refreshedPanels > 0) {
       console.log(`Ensured ${refreshedPanels} configured role panel(s).`);
@@ -33,6 +32,7 @@ module.exports = async (client) => {
   }
 
   try {
+    const { startLiveMonitor } = require('../liveService');
     await startLiveMonitor(client);
   } catch (error) {
     console.error('Failed to start live monitor:', error);

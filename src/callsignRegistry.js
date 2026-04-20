@@ -1,4 +1,4 @@
-const { getDefaultGuildState, readGuildState, updateGuildState } = require('./store');
+const store = require('./store');
 
 function normaliseIataDesignator(value) {
   const normalised = `${value || ''}`.trim().toUpperCase();
@@ -11,7 +11,7 @@ function normaliseIcaoRoot(value) {
 }
 
 async function getGuildState(guildId) {
-  return readGuildState(guildId);
+  return store.readGuildState(guildId);
 }
 
 async function getCallsignConfig(guildId) {
@@ -48,8 +48,8 @@ async function setCallsignMapping(guildId, iataDesignator, icaoRoot) {
     throw new Error('ICAO root must be three letters.');
   }
 
-  return updateGuildState(guildId, (guildState) => {
-    guildState.callsignConfig = guildState.callsignConfig || getDefaultGuildState().callsignConfig;
+  return store.updateGuildState(guildId, (guildState) => {
+    guildState.callsignConfig = guildState.callsignConfig || store.getDefaultGuildState().callsignConfig;
     guildState.callsignConfig.iataMappings = guildState.callsignConfig.iataMappings || {};
     guildState.callsignConfig.iataMappings[normalisedIataDesignator] = normalisedIcaoRoot;
 
@@ -67,8 +67,8 @@ async function removeCallsignMapping(guildId, iataDesignator) {
     throw new Error('IATA designator must be two alphanumeric characters.');
   }
 
-  return updateGuildState(guildId, (guildState) => {
-    guildState.callsignConfig = guildState.callsignConfig || getDefaultGuildState().callsignConfig;
+  return store.updateGuildState(guildId, (guildState) => {
+    guildState.callsignConfig = guildState.callsignConfig || store.getDefaultGuildState().callsignConfig;
     guildState.callsignConfig.iataMappings = guildState.callsignConfig.iataMappings || {};
 
     const existingIcaoRoot = guildState.callsignConfig.iataMappings[normalisedIataDesignator] || '';

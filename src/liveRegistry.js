@@ -1,5 +1,5 @@
 const { PLATFORMS } = require('./liveProviders');
-const { readGuildState, updateGuildState } = require('./store');
+const store = require('./store');
 
 function createEmptyChannels() {
   return Object.fromEntries(PLATFORMS.map((platform) => [platform, null]));
@@ -28,7 +28,7 @@ function normaliseDiscordUserId(discordUserId) {
 }
 
 async function getGuildState(guildId) {
-  return readGuildState(guildId);
+  return store.readGuildState(guildId);
 }
 
 async function getLiveConfig(guildId) {
@@ -36,7 +36,7 @@ async function getLiveConfig(guildId) {
 }
 
 async function setLiveConfig(guildId, patch) {
-  return updateGuildState(guildId, (guildState) => {
+  return store.updateGuildState(guildId, (guildState) => {
     guildState.liveConfig = {
       ...guildState.liveConfig,
       ...patch
@@ -64,7 +64,7 @@ async function getStreamer(guildId, discordUserId) {
 async function upsertStreamer(guildId, discordUserId, patch = {}) {
   const normalisedDiscordUserId = normaliseDiscordUserId(discordUserId);
 
-  return updateGuildState(guildId, (guildState) => {
+  return store.updateGuildState(guildId, (guildState) => {
     guildState.streamers = guildState.streamers || {};
 
     const existing = normaliseStreamerRecord(guildState.streamers[normalisedDiscordUserId], normalisedDiscordUserId);
@@ -88,7 +88,7 @@ async function upsertStreamer(guildId, discordUserId, patch = {}) {
 async function removeStreamer(guildId, discordUserId) {
   const normalisedDiscordUserId = normaliseDiscordUserId(discordUserId);
 
-  return updateGuildState(guildId, (guildState) => {
+  return store.updateGuildState(guildId, (guildState) => {
     guildState.streamers = guildState.streamers || {};
     guildState.liveSessions = guildState.liveSessions || {};
 
@@ -110,7 +110,7 @@ async function setStreamerChannel(guildId, discordUserId, platform, channel) {
 
   const normalisedDiscordUserId = normaliseDiscordUserId(discordUserId);
 
-  return updateGuildState(guildId, (guildState) => {
+  return store.updateGuildState(guildId, (guildState) => {
     guildState.streamers = guildState.streamers || {};
 
     const existing = normaliseStreamerRecord(guildState.streamers[normalisedDiscordUserId], normalisedDiscordUserId);
@@ -129,7 +129,7 @@ async function removeStreamerChannel(guildId, discordUserId, platform) {
 
   const normalisedDiscordUserId = normaliseDiscordUserId(discordUserId);
 
-  return updateGuildState(guildId, (guildState) => {
+  return store.updateGuildState(guildId, (guildState) => {
     guildState.streamers = guildState.streamers || {};
 
     const existing = guildState.streamers[normalisedDiscordUserId]
@@ -155,7 +155,7 @@ async function getLiveSession(guildId, discordUserId) {
 async function setLiveSession(guildId, discordUserId, session) {
   const normalisedDiscordUserId = normaliseDiscordUserId(discordUserId);
 
-  return updateGuildState(guildId, (guildState) => {
+  return store.updateGuildState(guildId, (guildState) => {
     guildState.liveSessions = guildState.liveSessions || {};
     guildState.liveSessions[normalisedDiscordUserId] = session;
     return guildState.liveSessions[normalisedDiscordUserId];
@@ -165,7 +165,7 @@ async function setLiveSession(guildId, discordUserId, session) {
 async function clearLiveSession(guildId, discordUserId) {
   const normalisedDiscordUserId = normaliseDiscordUserId(discordUserId);
 
-  return updateGuildState(guildId, (guildState) => {
+  return store.updateGuildState(guildId, (guildState) => {
     guildState.liveSessions = guildState.liveSessions || {};
     const existing = guildState.liveSessions[normalisedDiscordUserId] || null;
     delete guildState.liveSessions[normalisedDiscordUserId];
