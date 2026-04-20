@@ -4,7 +4,7 @@ const {
   PermissionFlagsBits,
   StringSelectMenuBuilder
 } = require('discord.js');
-const { getDefaultGuildState, readStore, updateStore } = require('./store');
+const { getDefaultGuildState, readGuildState, updateGuildState } = require('./store');
 
 const ROLE_PANEL_CUSTOM_ID_PREFIX = 'dispatch-role-panel';
 
@@ -34,25 +34,23 @@ function buildRolePanelContent() {
 }
 
 async function getRolePanelConfig(guildId) {
-  const state = await readStore();
-  return state.guilds?.[guildId]?.rolePanelConfig || getDefaultGuildState().rolePanelConfig;
+  return (await readGuildState(guildId)).rolePanelConfig || getDefaultGuildState().rolePanelConfig;
 }
 
 async function updateRolePanelConfig(guildId, updater) {
-  return updateStore((state) => {
-    state.guilds[guildId] = state.guilds[guildId] || getDefaultGuildState();
-    const currentConfig = state.guilds[guildId].rolePanelConfig || getDefaultGuildState().rolePanelConfig;
+  return updateGuildState(guildId, (guildState) => {
+    const currentConfig = guildState.rolePanelConfig || getDefaultGuildState().rolePanelConfig;
     const nextConfig = updater({
       channelId: currentConfig.channelId || '',
       roleIds: Array.isArray(currentConfig.roleIds) ? [...currentConfig.roleIds] : []
     });
 
-    state.guilds[guildId].rolePanelConfig = {
+    guildState.rolePanelConfig = {
       channelId: nextConfig.channelId || '',
       roleIds: Array.from(new Set((nextConfig.roleIds || []).map((value) => `${value}`.trim()).filter(Boolean)))
     };
 
-    return state.guilds[guildId].rolePanelConfig;
+    return guildState.rolePanelConfig;
   });
 }
 
