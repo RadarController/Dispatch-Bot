@@ -87,6 +87,47 @@ Aviation-themed Discord operations bot for stream notifications, community manag
 
 ---
 
+### Welcome Messages
+
+- `/welcome status`  
+  Show the current welcome message configuration for this server.
+
+- `/welcome enable`  
+  Enable welcome messages for this server.
+
+- `/welcome disable`  
+  Disable welcome messages for this server.
+
+- `/welcome set-channel <channel>`  
+  Set the channel used for welcome messages.
+
+- `/welcome set-rules-channel <channel>`  
+  Set the rules or info channel referenced by welcome messages.
+
+- `/welcome clear-rules-channel`  
+  Clear the configured rules or info channel.
+
+- `/welcome set-mentions <enabled>`  
+  Choose whether welcome messages mention the new member.
+
+- `/welcome add <message>`  
+  Add a custom welcome message template for this server.  
+  Supported placeholders: `{user}`, `{server}`, `{rules}`, `{count}`
+
+- `/welcome remove <index>`  
+  Remove a custom welcome message by number.
+
+- `/welcome list`  
+  List the active welcome messages for this server.
+
+- `/welcome clear-custom`  
+  Clear all custom welcome messages and fall back to the built-in aviation-themed list.
+
+- `/welcome test [member]`  
+  Preview a welcome message without posting it.
+
+---
+
 ### Self-Assignable Roles
 
 - `/roles list`  
@@ -123,6 +164,12 @@ Aviation-themed Discord operations bot for stream notifications, community manag
 
 ## Permission Notes
 
-- `/liveconfig` and `/callsignconfig` are server-management commands intended for members with **Manage Server** permission.
+- `/liveconfig`, `/callsignconfig`, and `/welcome` are server-management commands intended for members with **Manage Server** permission.
 - `/roles` configuration and panel management require **Manage Roles** permission.
 - `/streamer` and `/channel` can be used on your own record, or on other users if you have **Manage Server** permission.
+
+## Setup Notes
+
+- Welcome messages rely on the Discord `guildMemberAdd` event.
+- The bot must have `GatewayIntentBits.GuildMembers` enabled in code.
+- **Server Members Intent** must also be enabled in the Discord Developer Portal under **Bot > Privileged Gateway Intents**.
