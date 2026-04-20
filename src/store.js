@@ -544,9 +544,51 @@ async function updateGuildState(guildId, updater) {
   return result;
 }
 
+async function getStoreStatus() {
+  const mode = shouldUseDatabase() ? 'database' : 'file';
+
+  try {
+    await ensureStoreInitialised();
+
+    if (shouldUseDatabase()) {
+      const pool = getDatabasePool();
+      const result = await pool.query('SELECT COUNT(*)::int AS guild_count FROM app_state');
+
+      return {
+        mode,
+        healthy: true,
+        guildCount: Number(result.rows[0]?.guild_count || 0),
+        filePath: '',
+        error: ''
+      };
+    }
+
+    const filePath = ensureFileStoreExists();
+    const raw = fs.readFileSync(filePath, 'utf-8');
+    const state = normaliseState(JSON.parse(raw));
+
+    return {
+      mode,
+      healthy: true,
+      guildCount: Object.keys(state.guilds || {}).length,
+      filePath,
+      error: ''
+    };
+  } catch (error) {
+    return {
+      mode,
+      healthy: false,
+      guildCount: 0,
+      filePath: mode === 'file' ? resolveDataFilePath() : '',
+      error: error.message || String(error)
+    };
+  }
+}
+
 module.exports = {
   getDefaultGuildState,
   getDefaultState,
+  getStoreStatus,
   listGuildIds,
   readGuildState,
   readStore,
