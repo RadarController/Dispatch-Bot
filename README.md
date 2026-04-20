@@ -39,6 +39,10 @@ Aviation-themed Discord operations bot for stream notifications, community manag
   - `/airport icao:EGLL section:atis`  
   - `/airport icao:EHAM section:atc`  
   - `/airport icao:KJFK section:charts`
+ 
+- `/airport <icao>`  
+  Show a combined airport panel for a four-letter ICAO airport code, including METAR, ATIS, ATC, and quick links to ChartFox and VATSIM Radar.  
+  Example: `/airport EGCC`
 
 - `/callsign <callsign>`  
   Show the aircraft type and filed route for a VATSIM callsign.  
