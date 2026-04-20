@@ -9,6 +9,16 @@ const LEGACY_STORE_STATE_KEY = 'dispatch-bot';
 let databasePool = null;
 let storeInitialisationPromise = null;
 
+function getDefaultWelcomeConfig() {
+  return {
+    enabled: false,
+    channelId: '',
+    rulesChannelId: '',
+    useMentions: true,
+    messages: []
+  };
+}
+
 function getDefaultGuildState() {
   return {
     liveConfig: {
@@ -23,6 +33,7 @@ function getDefaultGuildState() {
     callsignConfig: {
       iataMappings: {}
     },
+    welcomeConfig: getDefaultWelcomeConfig(),
     streamers: {},
     liveSessions: {}
   };
@@ -89,6 +100,28 @@ function normaliseSnowflake(value) {
   return /^\d{17,20}$/.test(normalised) ? normalised : '';
 }
 
+function normaliseWelcomeMessages(messages) {
+  if (!Array.isArray(messages)) {
+    return [];
+  }
+
+  return messages
+    .map((value) => `${value}`.trim())
+    .filter(Boolean);
+}
+
+function normaliseWelcomeConfig(raw) {
+  const defaults = getDefaultWelcomeConfig();
+
+  return {
+    enabled: raw?.enabled === true,
+    channelId: normaliseSnowflake(raw?.channelId),
+    rulesChannelId: normaliseSnowflake(raw?.rulesChannelId),
+    useMentions: raw?.useMentions === undefined ? defaults.useMentions : Boolean(raw.useMentions),
+    messages: normaliseWelcomeMessages(raw?.messages || defaults.messages)
+  };
+}
+
 function normaliseStreamerRecord(record, discordUserId) {
   return {
     discordUserId,
@@ -141,6 +174,7 @@ function normaliseGuildState(raw) {
       ...(raw?.callsignConfig || {}),
       iataMappings: normaliseIataMappings(raw?.callsignConfig?.iataMappings || defaults.callsignConfig.iataMappings)
     },
+    welcomeConfig: normaliseWelcomeConfig(raw?.welcomeConfig),
     streamers: normaliseStreamers(raw?.streamers),
     liveSessions: raw?.liveSessions && typeof raw.liveSessions === 'object' ? raw.liveSessions : {}
   };
