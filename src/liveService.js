@@ -6,6 +6,25 @@ const store = require('./store');
 let liveMonitorHandle = null;
 let tickInProgress = false;
 
+const liveMonitorStatus = {
+  running: false,
+  tickInProgress: false,
+  startedAt: null,
+  intervalMs: config.livePollIntervalMs,
+  lastTickStartedAt: null,
+  lastTickCompletedAt: null,
+  lastTickDurationMs: null,
+  lastTickGuildCount: 0,
+  lastTickStreamerCount: 0,
+  lastTickError: ''
+};
+
+function getLiveMonitorStatus() {
+  return {
+    ...liveMonitorStatus
+  };
+}
+
 function hasAnyLivePlatform(platformStates) {
   return Object.values(platformStates).some((state) => state?.isLive);
 }
@@ -149,17 +168,22 @@ async function runLiveMonitorTick(client) {
   }
 
   tickInProgress = true;
+  liveMonitorStatus.tickInProgress = true;
+  liveMonitorStatus.lastTickStartedAt = new Date().toISOString();
+  liveMonitorStatus.lastTickError = '';
+
+  const tickStartedAtMs = Date.now();
+  let guildCount = 0;
+  let streamerCount = 0;
 
   try {
     const guildIds = await store.listGuildIds();
-
-    if (guildIds.length === 0) {
-      return;
-    }
+    guildCount = guildIds.length;
 
     for (const guildId of guildIds) {
       const state = await store.readGuildState(guildId);
       const streamers = Object.values(state.streamers || {});
+      streamerCount += streamers.length;
 
       if (streamers.length === 0) {
         continue;
@@ -172,8 +196,14 @@ async function runLiveMonitorTick(client) {
       await store.writeGuildState(guildId, state);
     }
   } catch (error) {
+    liveMonitorStatus.lastTickError = error.message || String(error);
     console.error('Live monitor tick failed:', error);
   } finally {
+    liveMonitorStatus.lastTickGuildCount = guildCount;
+    liveMonitorStatus.lastTickStreamerCount = streamerCount;
+    liveMonitorStatus.lastTickCompletedAt = new Date().toISOString();
+    liveMonitorStatus.lastTickDurationMs = Date.now() - tickStartedAtMs;
+    liveMonitorStatus.tickInProgress = false;
     tickInProgress = false;
   }
 }
@@ -182,6 +212,10 @@ async function startLiveMonitor(client) {
   if (liveMonitorHandle) {
     return;
   }
+
+  liveMonitorStatus.running = true;
+  liveMonitorStatus.startedAt = liveMonitorStatus.startedAt || new Date().toISOString();
+  liveMonitorStatus.intervalMs = config.livePollIntervalMs;
 
   await runLiveMonitorTick(client);
 
@@ -199,5 +233,6 @@ async function startLiveMonitor(client) {
 }
 
 module.exports = {
+  getLiveMonitorStatus,
   startLiveMonitor
 };
