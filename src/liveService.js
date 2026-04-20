@@ -1,7 +1,7 @@
 const { ChannelType } = require('discord.js');
 const { config } = require('./config');
 const { checkLiveChannel, PLATFORM_LABELS, PLATFORMS } = require('./liveProviders');
-const { readStore, writeStore } = require('./store');
+const { listGuildIds, readGuildState, writeGuildState } = require('./store');
 
 let liveMonitorHandle = null;
 let tickInProgress = false;
@@ -74,11 +74,15 @@ async function getAnnouncementChannel(client, channelId) {
   return channel;
 }
 
-async function processStreamer(client, state, streamer) {
+async function processStreamer(client, guildId, state, streamer) {
   const liveConfig = state.liveConfig || {};
   const announcementChannel = await getAnnouncementChannel(client, liveConfig.liveAnnouncementsChannelId);
 
   if (!announcementChannel) {
+    return;
+  }
+
+  if (announcementChannel.guild?.id !== guildId) {
     return;
   }
 
@@ -147,18 +151,26 @@ async function runLiveMonitorTick(client) {
   tickInProgress = true;
 
   try {
-    const state = await readStore();
-    const streamers = Object.values(state.streamers || {});
+    const guildIds = await listGuildIds();
 
-    if (streamers.length === 0) {
+    if (guildIds.length === 0) {
       return;
     }
 
-    for (const streamer of streamers) {
-      await processStreamer(client, state, streamer);
-    }
+    for (const guildId of guildIds) {
+      const state = await readGuildState(guildId);
+      const streamers = Object.values(state.streamers || {});
 
-    await writeStore(state);
+      if (streamers.length === 0) {
+        continue;
+      }
+
+      for (const streamer of streamers) {
+        await processStreamer(client, guildId, state, streamer);
+      }
+
+      await writeGuildState(guildId, state);
+    }
   } catch (error) {
     console.error('Live monitor tick failed:', error);
   } finally {

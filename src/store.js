@@ -1,276 +1,188 @@
-const fs = require('node:fs');
-const path = require('node:path');
-const { Pool } = require('pg');
-const { config } = require('./config');
+const { PLATFORMS } = require('./liveProviders');
+const { readGuildState, updateGuildState } = require('./store');
 
-const STORE_VERSION = 2;
-const STORE_STATE_KEY = 'dispatch-bot';
+function createEmptyChannels() {
+  return Object.fromEntries(PLATFORMS.map((platform) => [platform, null]));
+}
 
-let databasePool = null;
-let storeInitialisationPromise = null;
-
-function getDefaultGuildState() {
+function normaliseStreamerRecord(record, discordUserId) {
   return {
-    liveConfig: {
-      streamerRoleId: '',
-      livePingRoleId: '',
-      liveAnnouncementsChannelId: ''
+    discordUserId,
+    displayName: record?.displayName || '',
+    channels: {
+      ...createEmptyChannels(),
+      ...(record?.channels || {})
     },
-    rolePanelConfig: {
-      channelId: '',
-      roleIds: []
-    },
-    callsignConfig: {
-      iataMappings: {}
-    },
-    streamers: {},
-    liveSessions: {}
+    addedAt: record?.addedAt || null,
+    updatedAt: record?.updatedAt || null
   };
 }
 
-function getDefaultState() {
-  return {
-    version: STORE_VERSION,
-    guilds: {}
-  };
-}
-
-function resolveDataFilePath() {
-  return config.dataFilePath || path.join(process.cwd(), 'data', 'dispatch-bot.json');
-}
-
-function shouldUseDatabase() {
-  return Boolean(config.databaseUrl);
-}
-
-function getDatabasePool() {
-  if (!shouldUseDatabase()) {
-    return null;
+function normaliseDiscordUserId(discordUserId) {
+  const normalised = `${discordUserId || ''}`.trim();
+  if (!/^\d{17,20}$/.test(normalised)) {
+    throw new Error('A valid Discord user ID is required.');
   }
 
-  if (!databasePool) {
-    const useSsl = !/localhost|127\.0\.0\.1/i.test(config.databaseUrl);
-    databasePool = new Pool({
-      connectionString: config.databaseUrl,
-      ssl: useSsl ? { rejectUnauthorized: false } : false
-    });
-  }
-
-  return databasePool;
+  return normalised;
 }
 
-function normaliseRoleIds(roleIds) {
-  return Array.from(
-    new Set(
-      Array.isArray(roleIds)
-        ? roleIds.map((value) => `${value}`.trim()).filter(Boolean)
-        : []
-    )
-  );
+async function getGuildState(guildId) {
+  return readGuildState(guildId);
 }
 
-function normaliseIataMappings(mappings) {
-  if (!mappings || typeof mappings !== 'object') {
-    return {};
-  }
-
-  return Object.fromEntries(
-    Object.entries(mappings)
-      .map(([iataDesignator, icaoRoot]) => [
-        `${iataDesignator}`.trim().toUpperCase(),
-        `${icaoRoot}`.trim().toUpperCase()
-      ])
-      .filter(([iataDesignator, icaoRoot]) => /^[A-Z0-9]{2}$/.test(iataDesignator) && /^[A-Z]{3}$/.test(icaoRoot))
-  );
+async function getLiveConfig(guildId) {
+  return (await getGuildState(guildId)).liveConfig;
 }
 
-function normaliseGuildState(raw) {
-  const defaults = getDefaultGuildState();
-
-  return {
-    liveConfig: {
-      ...defaults.liveConfig,
-      ...(raw?.liveConfig || {})
-    },
-    rolePanelConfig: {
-      ...defaults.rolePanelConfig,
-      ...(raw?.rolePanelConfig || {}),
-      roleIds: normaliseRoleIds(raw?.rolePanelConfig?.roleIds || defaults.rolePanelConfig.roleIds)
-    },
-    callsignConfig: {
-      ...defaults.callsignConfig,
-      ...(raw?.callsignConfig || {}),
-      iataMappings: normaliseIataMappings(raw?.callsignConfig?.iataMappings || defaults.callsignConfig.iataMappings)
-    },
-    streamers: raw?.streamers && typeof raw.streamers === 'object' ? raw.streamers : {},
-    liveSessions: raw?.liveSessions && typeof raw.liveSessions === 'object' ? raw.liveSessions : {}
-  };
-}
-
-function migrateLegacyState(raw) {
-  if (!raw || typeof raw !== 'object') {
-    return getDefaultState();
-  }
-
-  if (raw.guilds && typeof raw.guilds === 'object') {
-    return {
-      version: STORE_VERSION,
-      guilds: Object.fromEntries(
-        Object.entries(raw.guilds).map(([guildId, guildState]) => [guildId, normaliseGuildState(guildState)])
-      )
+async function setLiveConfig(guildId, patch) {
+  return updateGuildState(guildId, (guildState) => {
+    guildState.liveConfig = {
+      ...guildState.liveConfig,
+      ...patch
     };
+
+    return guildState.liveConfig;
+  });
+}
+
+async function listStreamers(guildId) {
+  const guildState = await getGuildState(guildId);
+
+  return Object.entries(guildState.streamers)
+    .map(([discordUserId, record]) => normaliseStreamerRecord(record, discordUserId))
+    .sort((left, right) => left.discordUserId.localeCompare(right.discordUserId));
+}
+
+async function getStreamer(guildId, discordUserId) {
+  const guildState = await getGuildState(guildId);
+  const normalisedDiscordUserId = normaliseDiscordUserId(discordUserId);
+  const record = guildState.streamers[normalisedDiscordUserId];
+  return record ? normaliseStreamerRecord(record, normalisedDiscordUserId) : null;
+}
+
+async function upsertStreamer(guildId, discordUserId, patch = {}) {
+  const normalisedDiscordUserId = normaliseDiscordUserId(discordUserId);
+
+  return updateGuildState(guildId, (guildState) => {
+    guildState.streamers = guildState.streamers || {};
+
+    const existing = normaliseStreamerRecord(guildState.streamers[normalisedDiscordUserId], normalisedDiscordUserId);
+    const next = {
+      ...existing,
+      ...patch,
+      discordUserId: normalisedDiscordUserId,
+      channels: {
+        ...existing.channels,
+        ...(patch.channels || {})
+      },
+      addedAt: existing.addedAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    guildState.streamers[normalisedDiscordUserId] = next;
+    return next;
+  });
+}
+
+async function removeStreamer(guildId, discordUserId) {
+  const normalisedDiscordUserId = normaliseDiscordUserId(discordUserId);
+
+  return updateGuildState(guildId, (guildState) => {
+    guildState.streamers = guildState.streamers || {};
+    guildState.liveSessions = guildState.liveSessions || {};
+
+    const existing = guildState.streamers[normalisedDiscordUserId]
+      ? normaliseStreamerRecord(guildState.streamers[normalisedDiscordUserId], normalisedDiscordUserId)
+      : null;
+
+    delete guildState.streamers[normalisedDiscordUserId];
+    delete guildState.liveSessions[normalisedDiscordUserId];
+
+    return existing;
+  });
+}
+
+async function setStreamerChannel(guildId, discordUserId, platform, channel) {
+  if (!PLATFORMS.includes(platform)) {
+    throw new Error(`Unsupported platform: ${platform}`);
   }
 
-  const hasLegacyFields =
-    raw.liveConfig ||
-    raw.streamers ||
-    raw.liveSessions;
+  const normalisedDiscordUserId = normaliseDiscordUserId(discordUserId);
 
-  if (!hasLegacyFields) {
-    return getDefaultState();
+  return updateGuildState(guildId, (guildState) => {
+    guildState.streamers = guildState.streamers || {};
+
+    const existing = normaliseStreamerRecord(guildState.streamers[normalisedDiscordUserId], normalisedDiscordUserId);
+    existing.channels[platform] = channel;
+    existing.addedAt = existing.addedAt || new Date().toISOString();
+    existing.updatedAt = new Date().toISOString();
+    guildState.streamers[normalisedDiscordUserId] = existing;
+    return existing;
+  });
+}
+
+async function removeStreamerChannel(guildId, discordUserId, platform) {
+  if (!PLATFORMS.includes(platform)) {
+    throw new Error(`Unsupported platform: ${platform}`);
   }
 
-  const migratedGuildId = config.discordGuildId || 'legacy-global';
+  const normalisedDiscordUserId = normaliseDiscordUserId(discordUserId);
 
-  return {
-    version: STORE_VERSION,
-    guilds: {
-      [migratedGuildId]: normaliseGuildState({
-        liveConfig: raw.liveConfig,
-        streamers: raw.streamers,
-        liveSessions: raw.liveSessions
-      })
+  return updateGuildState(guildId, (guildState) => {
+    guildState.streamers = guildState.streamers || {};
+
+    const existing = guildState.streamers[normalisedDiscordUserId]
+      ? normaliseStreamerRecord(guildState.streamers[normalisedDiscordUserId], normalisedDiscordUserId)
+      : null;
+
+    if (!existing) {
+      return null;
     }
-  };
+
+    existing.channels[platform] = null;
+    existing.updatedAt = new Date().toISOString();
+    guildState.streamers[normalisedDiscordUserId] = existing;
+    return existing;
+  });
 }
 
-function normaliseState(raw) {
-  const migrated = migrateLegacyState(raw);
-
-  return {
-    version: STORE_VERSION,
-    guilds: Object.fromEntries(
-      Object.entries(migrated.guilds || {}).map(([guildId, guildState]) => [guildId, normaliseGuildState(guildState)])
-    )
-  };
+async function getLiveSession(guildId, discordUserId) {
+  const normalisedDiscordUserId = normaliseDiscordUserId(discordUserId);
+  return (await getGuildState(guildId)).liveSessions[normalisedDiscordUserId] || null;
 }
 
-function ensureFileStoreExists() {
-  const filePath = resolveDataFilePath();
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+async function setLiveSession(guildId, discordUserId, session) {
+  const normalisedDiscordUserId = normaliseDiscordUserId(discordUserId);
 
-  if (!fs.existsSync(filePath)) {
-    fs.writeFileSync(filePath, JSON.stringify(getDefaultState(), null, 2));
-  }
-
-  return filePath;
+  return updateGuildState(guildId, (guildState) => {
+    guildState.liveSessions = guildState.liveSessions || {};
+    guildState.liveSessions[normalisedDiscordUserId] = session;
+    return guildState.liveSessions[normalisedDiscordUserId];
+  });
 }
 
-async function initialiseDatabaseStore() {
-  const pool = getDatabasePool();
-  if (!pool) {
-    return;
-  }
+async function clearLiveSession(guildId, discordUserId) {
+  const normalisedDiscordUserId = normaliseDiscordUserId(discordUserId);
 
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS app_state (
-      state_key TEXT PRIMARY KEY,
-      state_json JSONB NOT NULL,
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `);
-
-  await pool.query(
-    `INSERT INTO app_state (state_key, state_json)
-     VALUES ($1, $2::jsonb)
-     ON CONFLICT (state_key) DO NOTHING`,
-    [STORE_STATE_KEY, JSON.stringify(getDefaultState())]
-  );
-}
-
-async function ensureStoreInitialised() {
-  if (!storeInitialisationPromise) {
-    storeInitialisationPromise = shouldUseDatabase()
-      ? initialiseDatabaseStore()
-      : Promise.resolve(ensureFileStoreExists());
-  }
-
-  await storeInitialisationPromise;
-}
-
-async function readStore() {
-  await ensureStoreInitialised();
-
-  if (shouldUseDatabase()) {
-    try {
-      const pool = getDatabasePool();
-      const result = await pool.query(
-        'SELECT state_json FROM app_state WHERE state_key = $1',
-        [STORE_STATE_KEY]
-      );
-
-      if (result.rows.length === 0) {
-        const defaults = getDefaultState();
-        await writeStore(defaults);
-        return defaults;
-      }
-
-      return normaliseState(result.rows[0].state_json);
-    } catch (error) {
-      console.error('Failed to read database store, falling back to defaults:', error);
-      return getDefaultState();
-    }
-  }
-
-  const filePath = ensureFileStoreExists();
-
-  try {
-    const raw = fs.readFileSync(filePath, 'utf-8');
-    return normaliseState(JSON.parse(raw));
-  } catch (error) {
-    console.error('Failed to read file store, falling back to defaults:', error);
-    return getDefaultState();
-  }
-}
-
-async function writeStore(state) {
-  await ensureStoreInitialised();
-  const nextState = normaliseState(state);
-
-  if (shouldUseDatabase()) {
-    const pool = getDatabasePool();
-    await pool.query(
-      `INSERT INTO app_state (state_key, state_json, updated_at)
-       VALUES ($1, $2::jsonb, NOW())
-       ON CONFLICT (state_key)
-       DO UPDATE SET state_json = EXCLUDED.state_json, updated_at = NOW()`,
-      [STORE_STATE_KEY, JSON.stringify(nextState)]
-    );
-
-    return nextState;
-  }
-
-  const filePath = ensureFileStoreExists();
-  const tempFilePath = `${filePath}.tmp`;
-
-  fs.writeFileSync(tempFilePath, JSON.stringify(nextState, null, 2));
-  fs.renameSync(tempFilePath, filePath);
-
-  return nextState;
-}
-
-async function updateStore(updater) {
-  const state = await readStore();
-  const result = await updater(state);
-  await writeStore(state);
-  return result;
+  return updateGuildState(guildId, (guildState) => {
+    guildState.liveSessions = guildState.liveSessions || {};
+    const existing = guildState.liveSessions[normalisedDiscordUserId] || null;
+    delete guildState.liveSessions[normalisedDiscordUserId];
+    return existing;
+  });
 }
 
 module.exports = {
-  getDefaultGuildState,
-  getDefaultState,
-  readStore,
-  resolveDataFilePath,
-  updateStore,
-  writeStore
+  clearLiveSession,
+  getLiveConfig,
+  getLiveSession,
+  getStreamer,
+  listStreamers,
+  removeStreamer,
+  removeStreamerChannel,
+  setLiveConfig,
+  setLiveSession,
+  setStreamerChannel,
+  upsertStreamer
 };

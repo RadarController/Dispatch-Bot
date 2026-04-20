@@ -1,4 +1,4 @@
-const { getDefaultGuildState, readStore, updateStore } = require('./store');
+const { getDefaultGuildState, readGuildState, updateGuildState } = require('./store');
 
 function normaliseIataDesignator(value) {
   const normalised = `${value || ''}`.trim().toUpperCase();
@@ -11,8 +11,7 @@ function normaliseIcaoRoot(value) {
 }
 
 async function getGuildState(guildId) {
-  const state = await readStore();
-  return state.guilds?.[guildId] || getDefaultGuildState();
+  return readGuildState(guildId);
 }
 
 async function getCallsignConfig(guildId) {
@@ -49,11 +48,10 @@ async function setCallsignMapping(guildId, iataDesignator, icaoRoot) {
     throw new Error('ICAO root must be three letters.');
   }
 
-  return updateStore((state) => {
-    state.guilds[guildId] = state.guilds[guildId] || getDefaultGuildState();
-    state.guilds[guildId].callsignConfig = state.guilds[guildId].callsignConfig || { iataMappings: {} };
-    state.guilds[guildId].callsignConfig.iataMappings = state.guilds[guildId].callsignConfig.iataMappings || {};
-    state.guilds[guildId].callsignConfig.iataMappings[normalisedIataDesignator] = normalisedIcaoRoot;
+  return updateGuildState(guildId, (guildState) => {
+    guildState.callsignConfig = guildState.callsignConfig || getDefaultGuildState().callsignConfig;
+    guildState.callsignConfig.iataMappings = guildState.callsignConfig.iataMappings || {};
+    guildState.callsignConfig.iataMappings[normalisedIataDesignator] = normalisedIcaoRoot;
 
     return {
       iataDesignator: normalisedIataDesignator,
@@ -69,17 +67,16 @@ async function removeCallsignMapping(guildId, iataDesignator) {
     throw new Error('IATA designator must be two alphanumeric characters.');
   }
 
-  return updateStore((state) => {
-    state.guilds[guildId] = state.guilds[guildId] || getDefaultGuildState();
-    state.guilds[guildId].callsignConfig = state.guilds[guildId].callsignConfig || { iataMappings: {} };
-    state.guilds[guildId].callsignConfig.iataMappings = state.guilds[guildId].callsignConfig.iataMappings || {};
+  return updateGuildState(guildId, (guildState) => {
+    guildState.callsignConfig = guildState.callsignConfig || getDefaultGuildState().callsignConfig;
+    guildState.callsignConfig.iataMappings = guildState.callsignConfig.iataMappings || {};
 
-    const existingIcaoRoot = state.guilds[guildId].callsignConfig.iataMappings[normalisedIataDesignator] || '';
+    const existingIcaoRoot = guildState.callsignConfig.iataMappings[normalisedIataDesignator] || '';
     if (!existingIcaoRoot) {
       return null;
     }
 
-    delete state.guilds[guildId].callsignConfig.iataMappings[normalisedIataDesignator];
+    delete guildState.callsignConfig.iataMappings[normalisedIataDesignator];
 
     return {
       iataDesignator: normalisedIataDesignator,
