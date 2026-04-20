@@ -19,6 +19,27 @@ function getDefaultWelcomeConfig() {
   };
 }
 
+function getDefaultScheduleConfig() {
+  return {
+    channelId: '',
+    mode: 'forum_post',
+    creatorRoleId: '',
+    titleFormat: 'Schedule | {displayName}'
+  };
+}
+
+function getDefaultScheduleEntries() {
+  return {
+    monday: '',
+    tuesday: '',
+    wednesday: '',
+    thursday: '',
+    friday: '',
+    saturday: '',
+    sunday: ''
+  };
+}
+
 function getDefaultGuildState() {
   return {
     liveConfig: {
@@ -34,11 +55,12 @@ function getDefaultGuildState() {
       iataMappings: {}
     },
     welcomeConfig: getDefaultWelcomeConfig(),
+    scheduleConfig: getDefaultScheduleConfig(),
+    schedules: {},
     streamers: {},
     liveSessions: {}
   };
 }
-
 function getDefaultState() {
   return {
     version: STORE_VERSION,
@@ -122,6 +144,68 @@ function normaliseWelcomeConfig(raw) {
   };
 }
 
+function normaliseScheduleEntries(entries) {
+  const defaults = getDefaultScheduleEntries();
+
+  return {
+    monday: typeof entries?.monday === 'string' ? entries.monday.trim() : defaults.monday,
+    tuesday: typeof entries?.tuesday === 'string' ? entries.tuesday.trim() : defaults.tuesday,
+    wednesday: typeof entries?.wednesday === 'string' ? entries.wednesday.trim() : defaults.wednesday,
+    thursday: typeof entries?.thursday === 'string' ? entries.thursday.trim() : defaults.thursday,
+    friday: typeof entries?.friday === 'string' ? entries.friday.trim() : defaults.friday,
+    saturday: typeof entries?.saturday === 'string' ? entries.saturday.trim() : defaults.saturday,
+    sunday: typeof entries?.sunday === 'string' ? entries.sunday.trim() : defaults.sunday
+  };
+}
+
+function normaliseScheduleConfig(raw) {
+  const defaults = getDefaultScheduleConfig();
+  const mode = raw?.mode === 'thread' ? 'thread' : defaults.mode;
+  const titleFormat = typeof raw?.titleFormat === 'string' && raw.titleFormat.trim()
+    ? raw.titleFormat.trim().slice(0, 100)
+    : defaults.titleFormat;
+
+  return {
+    channelId: normaliseSnowflake(raw?.channelId),
+    mode,
+    creatorRoleId: normaliseSnowflake(raw?.creatorRoleId),
+    titleFormat
+  };
+}
+
+function normaliseScheduleRecord(record, ownerUserId) {
+  const normalisedOwnerUserId = normaliseSnowflake(record?.ownerUserId || ownerUserId);
+  if (!normalisedOwnerUserId) {
+    return null;
+  }
+
+  return {
+    ownerUserId: normalisedOwnerUserId,
+    displayName: typeof record?.displayName === 'string' ? record.displayName.trim() : '',
+    threadId: normaliseSnowflake(record?.threadId),
+    rootMessageId: normaliseSnowflake(record?.rootMessageId),
+    entries: normaliseScheduleEntries(record?.entries),
+    updatedAt: typeof record?.updatedAt === 'string' && record.updatedAt.trim()
+      ? record.updatedAt
+      : null
+  };
+}
+
+function normaliseSchedules(schedules) {
+  if (!schedules || typeof schedules !== 'object') {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(schedules)
+      .map(([ownerUserId, record]) => {
+        const normalised = normaliseScheduleRecord(record, ownerUserId);
+        return normalised ? [normalised.ownerUserId, normalised] : null;
+      })
+      .filter(Boolean)
+  );
+}
+
 function normaliseStreamerRecord(record, discordUserId) {
   return {
     discordUserId,
@@ -175,8 +259,10 @@ function normaliseGuildState(raw) {
       iataMappings: normaliseIataMappings(raw?.callsignConfig?.iataMappings || defaults.callsignConfig.iataMappings)
     },
     welcomeConfig: normaliseWelcomeConfig(raw?.welcomeConfig),
+    scheduleConfig: normaliseScheduleConfig(raw?.scheduleConfig),
+    schedules: normaliseSchedules(raw?.schedules),
     streamers: normaliseStreamers(raw?.streamers),
-    liveSessions: raw?.liveSessions && typeof raw.liveSessions === 'object' ? raw.liveSessions : {}
+    liveSessions: raw?.liveSessions && typeof raw?.liveSessions === 'object' ? raw.liveSessions : {}
   };
 }
 

@@ -1,5 +1,5 @@
 # Dispatch-Bot
-Aviation-themed Discord operations bot for stream notifications, community management, and utility commands
+Aviation-themed Discord operations bot for stream notifications, community management, and utility commands.
 
 ---
 
@@ -27,18 +27,22 @@ Aviation-themed Discord operations bot for stream notifications, community manag
 
 ### Airport / Aviation Utilities
 
-- `/airport <icao>`  
+- `/airport icao:<icao>`  
   Show a combined airport panel for a four-letter ICAO airport code, including METAR, ATIS, ATC, and quick links to ChartFox and VATSIM Radar.  
-  Example: `/airport EGCC`
+  Example: `/airport icao:EGCC`
 
-- `/airport <icao> [section]`  
+- `/airport icao:<icao> section:<section>`  
   Show a focused airport panel for one section only.  
   Supported sections: `overview`, `metar`, `atis`, `atc`, `charts`  
   Examples:  
-  - `/airport EGCC metar`  
-  - `/airport EGLL atis`  
-  - `/airport EHAM atc`  
-  - `/airport KJFK charts`
+  - `/airport icao:EGCC section:metar`  
+  - `/airport icao:EGLL section:atis`  
+  - `/airport icao:EHAM section:atc`  
+  - `/airport icao:KJFK section:charts`
+ 
+- `/airport <icao>`  
+  Show a combined airport panel for a four-letter ICAO airport code, including METAR, ATIS, ATC, and quick links to ChartFox and VATSIM Radar.  
+  Example: `/airport EGCC`
 
 - `/callsign <callsign>`  
   Show the aircraft type and filed route for a VATSIM callsign.  
@@ -109,6 +113,56 @@ Aviation-themed Discord operations bot for stream notifications, community manag
 
 - `/liveconfig set-channel <channel>`  
   Set the channel used for live announcements.
+
+---
+
+### Schedule Posts
+
+#### Admin configuration
+
+- `/schedule config status`  
+  Show the current schedule configuration for this server.
+
+- `/schedule config set-channel <channel>`  
+  Set the channel where creator schedules will be posted.  
+  Supports forum channels, text channels, and announcement channels.
+
+- `/schedule config set-mode <forum_post|thread>`  
+  Choose whether schedules are created as forum posts or message threads.
+
+- `/schedule config set-creator-role <role>`  
+  Set the role that allows members to manage their own schedule.
+
+- `/schedule config set-title-format <format>`  
+  Set the schedule title format.  
+  Supported tokens: `{displayName}`, `{username}`
+
+- `/schedule config clear`  
+  Clear the schedule configuration for this server.
+
+#### Creator schedule management
+
+- `/schedule status`  
+  Show your schedule status, including whether you already have a post or thread.
+
+- `/schedule create`  
+  Create your schedule post or thread, or update it if it already exists.
+
+- `/schedule set <day> <text>`  
+  Set one day of your schedule.  
+  Supported days: `monday`, `tuesday`, `wednesday`, `thursday`, `friday`, `saturday`, `sunday`
+
+- `/schedule remove <day>`  
+  Clear one day from your schedule.
+
+- `/schedule clear`  
+  Clear all of your saved schedule entries.
+
+- `/schedule publish`  
+  Create or update your schedule post or thread from the saved schedule data.
+
+- `/schedule refresh`  
+  Refresh your existing schedule post or thread.
 
 ---
 
@@ -190,12 +244,20 @@ Aviation-themed Discord operations bot for stream notifications, community manag
 ## Permission Notes
 
 - `/status`, `/liveconfig`, `/callsignconfig`, and `/welcome` are server-management commands intended for members with **Manage Server** permission.
+- `/schedule config ...` commands require **Manage Server** permission.
+- `/schedule` creator commands require the configured **creator role** for that server. Members with **Manage Server** permission can also use them.
 - `/roles` configuration and panel management require **Manage Roles** permission.
 - `/streamer` and `/channel` can be used on your own record, or on other users if you have **Manage Server** permission.
+
+---
 
 ## Setup Notes
 
 - Welcome messages rely on the Discord `guildMemberAdd` event.
 - The bot must have `GatewayIntentBits.GuildMembers` enabled in code.
 - **Server Members Intent** must also be enabled in the Discord Developer Portal under **Bot > Privileged Gateway Intents**.
-- The combined `/airport` command includes fixed link buttons for **Charts** (ChartFox) and **Radar** (VATSIM Radar) on airport panels.
+- The combined `/airport` command includes fixed link buttons for **Charts** (ChartFox) and **Radar** (VATSIM Radar).
+- `/schedule` supports:
+  - **Forum channels** in `forum_post` mode
+  - **Text or announcement channels** in `thread` mode
+- Creator schedules are stored per user, per guild, and update the same post or thread instead of creating duplicates.
