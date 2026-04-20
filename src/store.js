@@ -5,6 +5,7 @@ const { config } = require('./config');
 
 const STORE_VERSION = 2;
 const LEGACY_STORE_STATE_KEY = 'dispatch-bot';
+const DAY_ORDER = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 
 let databasePool = null;
 let storeInitialisationPromise = null;
@@ -61,6 +62,7 @@ function getDefaultGuildState() {
     liveSessions: {}
   };
 }
+
 function getDefaultState() {
   return {
     version: STORE_VERSION,
@@ -325,21 +327,179 @@ function ensureFileStoreExists() {
   return filePath;
 }
 
-async function initialiseDatabaseStore() {
-  const pool = getDatabasePool();
-  if (!pool) {
-    return;
-  }
+async function tableExists(db, tableName) {
+  const result = await db.query(
+    `SELECT EXISTS (
+      SELECT 1
+      FROM information_schema.tables
+      WHERE table_schema = 'public'
+        AND table_name = $1
+    ) AS exists`,
+    [tableName]
+  );
 
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS app_state (
+  return result.rows[0]?.exists === true;
+}
+
+async function createNormalisedTables(db) {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS guilds (
       guild_id TEXT PRIMARY KEY,
-      state_json JSONB NOT NULL,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
 
-  const columnResult = await pool.query(`
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS guild_live_config (
+      guild_id TEXT PRIMARY KEY REFERENCES guilds(guild_id) ON DELETE CASCADE,
+      streamer_role_id TEXT NOT NULL DEFAULT '',
+      live_ping_role_id TEXT NOT NULL DEFAULT '',
+      live_announcements_channel_id TEXT NOT NULL DEFAULT ''
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS guild_role_panel_config (
+      guild_id TEXT PRIMARY KEY REFERENCES guilds(guild_id) ON DELETE CASCADE,
+      channel_id TEXT NOT NULL DEFAULT ''
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS guild_role_panel_roles (
+      guild_id TEXT NOT NULL REFERENCES guilds(guild_id) ON DELETE CASCADE,
+      role_id TEXT NOT NULL,
+      PRIMARY KEY (guild_id, role_id)
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS guild_callsign_mappings (
+      guild_id TEXT NOT NULL REFERENCES guilds(guild_id) ON DELETE CASCADE,
+      iata_designator TEXT NOT NULL,
+      icao_root TEXT NOT NULL,
+      PRIMARY KEY (guild_id, iata_designator)
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS guild_welcome_config (
+      guild_id TEXT PRIMARY KEY REFERENCES guilds(guild_id) ON DELETE CASCADE,
+      enabled BOOLEAN NOT NULL DEFAULT FALSE,
+      channel_id TEXT NOT NULL DEFAULT '',
+      rules_channel_id TEXT NOT NULL DEFAULT '',
+      use_mentions BOOLEAN NOT NULL DEFAULT TRUE
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS guild_welcome_messages (
+      guild_id TEXT NOT NULL REFERENCES guilds(guild_id) ON DELETE CASCADE,
+      sort_order INTEGER NOT NULL,
+      message TEXT NOT NULL,
+      PRIMARY KEY (guild_id, sort_order)
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS guild_schedule_config (
+      guild_id TEXT PRIMARY KEY REFERENCES guilds(guild_id) ON DELETE CASCADE,
+      channel_id TEXT NOT NULL DEFAULT '',
+      mode TEXT NOT NULL DEFAULT 'forum_post',
+      creator_role_id TEXT NOT NULL DEFAULT '',
+      title_format TEXT NOT NULL DEFAULT 'Schedule | {displayName}'
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS guild_schedules (
+      guild_id TEXT NOT NULL REFERENCES guilds(guild_id) ON DELETE CASCADE,
+      owner_user_id TEXT NOT NULL,
+      display_name TEXT NOT NULL DEFAULT '',
+      thread_id TEXT NOT NULL DEFAULT '',
+      root_message_id TEXT NOT NULL DEFAULT '',
+      updated_at TIMESTAMPTZ NULL,
+      PRIMARY KEY (guild_id, owner_user_id)
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS guild_schedule_entries (
+      guild_id TEXT NOT NULL,
+      owner_user_id TEXT NOT NULL,
+      day_of_week TEXT NOT NULL,
+      entry_text TEXT NOT NULL DEFAULT '',
+      PRIMARY KEY (guild_id, owner_user_id, day_of_week),
+      FOREIGN KEY (guild_id, owner_user_id)
+        REFERENCES guild_schedules(guild_id, owner_user_id)
+        ON DELETE CASCADE
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS guild_streamers (
+      guild_id TEXT NOT NULL REFERENCES guilds(guild_id) ON DELETE CASCADE,
+      discord_user_id TEXT NOT NULL,
+      display_name TEXT NOT NULL DEFAULT '',
+      added_at TIMESTAMPTZ NULL,
+      updated_at TIMESTAMPTZ NULL,
+      PRIMARY KEY (guild_id, discord_user_id)
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS guild_streamer_channels (
+      guild_id TEXT NOT NULL,
+      discord_user_id TEXT NOT NULL,
+      platform TEXT NOT NULL,
+      url TEXT NOT NULL,
+      identifier TEXT NOT NULL DEFAULT '',
+      PRIMARY KEY (guild_id, discord_user_id, platform),
+      FOREIGN KEY (guild_id, discord_user_id)
+        REFERENCES guild_streamers(guild_id, discord_user_id)
+        ON DELETE CASCADE
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS guild_live_sessions (
+      guild_id TEXT NOT NULL REFERENCES guilds(guild_id) ON DELETE CASCADE,
+      discord_user_id TEXT NOT NULL,
+      started_at TIMESTAMPTZ NULL,
+      announcement_channel_id TEXT NOT NULL DEFAULT '',
+      announcement_message_id TEXT NOT NULL DEFAULT '',
+      updated_at TIMESTAMPTZ NULL,
+      last_announcement_hash TEXT NOT NULL DEFAULT '',
+      PRIMARY KEY (guild_id, discord_user_id)
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS guild_live_session_platforms (
+      guild_id TEXT NOT NULL,
+      discord_user_id TEXT NOT NULL,
+      platform TEXT NOT NULL,
+      state_json JSONB NOT NULL,
+      PRIMARY KEY (guild_id, discord_user_id, platform),
+      FOREIGN KEY (guild_id, discord_user_id)
+        REFERENCES guild_live_sessions(guild_id, discord_user_id)
+        ON DELETE CASCADE
+    )
+  `);
+}
+
+async function countNormalisedGuilds(db) {
+  const result = await db.query('SELECT COUNT(*)::int AS guild_count FROM guilds');
+  return Number(result.rows[0]?.guild_count || 0);
+}
+
+async function readLegacyAppState(db) {
+  const exists = await tableExists(db, 'app_state');
+  if (!exists) {
+    return getDefaultState();
+  }
+
+  const columnResult = await db.query(`
     SELECT column_name
     FROM information_schema.columns
     WHERE table_schema = 'public'
@@ -347,58 +507,564 @@ async function initialiseDatabaseStore() {
   `);
 
   const columns = new Set(columnResult.rows.map((row) => row.column_name));
-  const hasLegacyShape = columns.has('state_key');
 
-  if (!hasLegacyShape) {
-    return;
-  }
+  if (columns.has('state_key') && columns.has('state_json')) {
+    const result = await db.query(
+      'SELECT state_json FROM app_state WHERE state_key = $1',
+      [LEGACY_STORE_STATE_KEY]
+    );
 
-  const legacyResult = await pool.query(
-    'SELECT state_json, updated_at FROM app_state WHERE state_key = $1',
-    [LEGACY_STORE_STATE_KEY]
-  );
-
-  if (legacyResult.rows.length === 0) {
-    await pool.query('DROP TABLE app_state');
-    await pool.query(`
-      CREATE TABLE app_state (
-        guild_id TEXT PRIMARY KEY,
-        state_json JSONB NOT NULL,
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      )
-    `);
-    return;
-  }
-
-  const migratedState = normaliseState(legacyResult.rows[0].state_json);
-
-  await pool.query('BEGIN');
-
-  try {
-    await pool.query('DROP TABLE IF EXISTS app_state_v2');
-    await pool.query(`
-      CREATE TABLE app_state_v2 (
-        guild_id TEXT PRIMARY KEY,
-        state_json JSONB NOT NULL,
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      )
-    `);
-
-    for (const [guildId, guildState] of Object.entries(migratedState.guilds)) {
-      await pool.query(
-        `INSERT INTO app_state_v2 (guild_id, state_json, updated_at)
-         VALUES ($1, $2::jsonb, $3)`,
-        [guildId, JSON.stringify(normaliseGuildState(guildState)), legacyResult.rows[0].updated_at]
-      );
+    if (result.rows.length === 0) {
+      return getDefaultState();
     }
 
-    await pool.query('DROP TABLE app_state');
-    await pool.query('ALTER TABLE app_state_v2 RENAME TO app_state');
-    await pool.query('COMMIT');
+    return normaliseState(result.rows[0].state_json);
+  }
+
+  if (columns.has('guild_id') && columns.has('state_json')) {
+    const result = await db.query('SELECT guild_id, state_json FROM app_state');
+
+    return {
+      version: STORE_VERSION,
+      guilds: Object.fromEntries(
+        result.rows.map((row) => [row.guild_id, normaliseGuildState(row.state_json)])
+      )
+    };
+  }
+
+  return getDefaultState();
+}
+
+async function writeGuildStateToDatabase(db, guildId, guildState) {
+  const nextGuildState = normaliseGuildState(guildState);
+
+  await db.query(
+    `INSERT INTO guilds (guild_id, updated_at)
+     VALUES ($1, NOW())
+     ON CONFLICT (guild_id)
+     DO UPDATE SET updated_at = NOW()`,
+    [guildId]
+  );
+
+  await db.query(
+    `INSERT INTO guild_live_config (
+       guild_id,
+       streamer_role_id,
+       live_ping_role_id,
+       live_announcements_channel_id
+     )
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (guild_id)
+     DO UPDATE SET
+       streamer_role_id = EXCLUDED.streamer_role_id,
+       live_ping_role_id = EXCLUDED.live_ping_role_id,
+       live_announcements_channel_id = EXCLUDED.live_announcements_channel_id`,
+    [
+      guildId,
+      nextGuildState.liveConfig.streamerRoleId || '',
+      nextGuildState.liveConfig.livePingRoleId || '',
+      nextGuildState.liveConfig.liveAnnouncementsChannelId || ''
+    ]
+  );
+
+  await db.query(
+    `INSERT INTO guild_role_panel_config (guild_id, channel_id)
+     VALUES ($1, $2)
+     ON CONFLICT (guild_id)
+     DO UPDATE SET channel_id = EXCLUDED.channel_id`,
+    [guildId, nextGuildState.rolePanelConfig.channelId || '']
+  );
+
+  await db.query('DELETE FROM guild_role_panel_roles WHERE guild_id = $1', [guildId]);
+  for (const roleId of nextGuildState.rolePanelConfig.roleIds || []) {
+    await db.query(
+      `INSERT INTO guild_role_panel_roles (guild_id, role_id)
+       VALUES ($1, $2)`,
+      [guildId, roleId]
+    );
+  }
+
+  await db.query('DELETE FROM guild_callsign_mappings WHERE guild_id = $1', [guildId]);
+  for (const [iataDesignator, icaoRoot] of Object.entries(nextGuildState.callsignConfig.iataMappings || {})) {
+    await db.query(
+      `INSERT INTO guild_callsign_mappings (guild_id, iata_designator, icao_root)
+       VALUES ($1, $2, $3)`,
+      [guildId, iataDesignator, icaoRoot]
+    );
+  }
+
+  await db.query(
+    `INSERT INTO guild_welcome_config (
+       guild_id,
+       enabled,
+       channel_id,
+       rules_channel_id,
+       use_mentions
+     )
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (guild_id)
+     DO UPDATE SET
+       enabled = EXCLUDED.enabled,
+       channel_id = EXCLUDED.channel_id,
+       rules_channel_id = EXCLUDED.rules_channel_id,
+       use_mentions = EXCLUDED.use_mentions`,
+    [
+      guildId,
+      nextGuildState.welcomeConfig.enabled === true,
+      nextGuildState.welcomeConfig.channelId || '',
+      nextGuildState.welcomeConfig.rulesChannelId || '',
+      nextGuildState.welcomeConfig.useMentions !== false
+    ]
+  );
+
+  await db.query('DELETE FROM guild_welcome_messages WHERE guild_id = $1', [guildId]);
+  for (const [index, message] of (nextGuildState.welcomeConfig.messages || []).entries()) {
+    await db.query(
+      `INSERT INTO guild_welcome_messages (guild_id, sort_order, message)
+       VALUES ($1, $2, $3)`,
+      [guildId, index, message]
+    );
+  }
+
+  await db.query(
+    `INSERT INTO guild_schedule_config (
+       guild_id,
+       channel_id,
+       mode,
+       creator_role_id,
+       title_format
+     )
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (guild_id)
+     DO UPDATE SET
+       channel_id = EXCLUDED.channel_id,
+       mode = EXCLUDED.mode,
+       creator_role_id = EXCLUDED.creator_role_id,
+       title_format = EXCLUDED.title_format`,
+    [
+      guildId,
+      nextGuildState.scheduleConfig.channelId || '',
+      nextGuildState.scheduleConfig.mode || 'forum_post',
+      nextGuildState.scheduleConfig.creatorRoleId || '',
+      nextGuildState.scheduleConfig.titleFormat || 'Schedule | {displayName}'
+    ]
+  );
+
+  await db.query('DELETE FROM guild_schedule_entries WHERE guild_id = $1', [guildId]);
+  await db.query('DELETE FROM guild_schedules WHERE guild_id = $1', [guildId]);
+
+  for (const [ownerUserId, record] of Object.entries(nextGuildState.schedules || {})) {
+    const schedule = normaliseScheduleRecord(record, ownerUserId);
+    if (!schedule) {
+      continue;
+    }
+
+    await db.query(
+      `INSERT INTO guild_schedules (
+         guild_id,
+         owner_user_id,
+         display_name,
+         thread_id,
+         root_message_id,
+         updated_at
+       )
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [
+        guildId,
+        schedule.ownerUserId,
+        schedule.displayName || '',
+        schedule.threadId || '',
+        schedule.rootMessageId || '',
+        schedule.updatedAt
+      ]
+    );
+
+    for (const dayOfWeek of DAY_ORDER) {
+      const entryText = schedule.entries?.[dayOfWeek] || '';
+      if (!entryText) {
+        continue;
+      }
+
+      await db.query(
+        `INSERT INTO guild_schedule_entries (
+           guild_id,
+           owner_user_id,
+           day_of_week,
+           entry_text
+         )
+         VALUES ($1, $2, $3, $4)`,
+        [guildId, schedule.ownerUserId, dayOfWeek, entryText]
+      );
+    }
+  }
+
+  await db.query('DELETE FROM guild_streamer_channels WHERE guild_id = $1', [guildId]);
+  await db.query('DELETE FROM guild_streamers WHERE guild_id = $1', [guildId]);
+
+  for (const [discordUserId, record] of Object.entries(nextGuildState.streamers || {})) {
+    const streamer = normaliseStreamerRecord(record, discordUserId);
+
+    await db.query(
+      `INSERT INTO guild_streamers (
+         guild_id,
+         discord_user_id,
+         display_name,
+         added_at,
+         updated_at
+       )
+       VALUES ($1, $2, $3, $4, $5)`,
+      [
+        guildId,
+        streamer.discordUserId,
+        streamer.displayName || '',
+        streamer.addedAt,
+        streamer.updatedAt
+      ]
+    );
+
+    for (const [platform, channel] of Object.entries(streamer.channels || {})) {
+      if (!channel?.url) {
+        continue;
+      }
+
+      await db.query(
+        `INSERT INTO guild_streamer_channels (
+           guild_id,
+           discord_user_id,
+           platform,
+           url,
+           identifier
+         )
+         VALUES ($1, $2, $3, $4, $5)`,
+        [
+          guildId,
+          streamer.discordUserId,
+          platform,
+          channel.url,
+          channel.identifier || ''
+        ]
+      );
+    }
+  }
+
+  await db.query('DELETE FROM guild_live_session_platforms WHERE guild_id = $1', [guildId]);
+  await db.query('DELETE FROM guild_live_sessions WHERE guild_id = $1', [guildId]);
+
+  for (const [discordUserId, session] of Object.entries(nextGuildState.liveSessions || {})) {
+    await db.query(
+      `INSERT INTO guild_live_sessions (
+         guild_id,
+         discord_user_id,
+         started_at,
+         announcement_channel_id,
+         announcement_message_id,
+         updated_at,
+         last_announcement_hash
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        guildId,
+        discordUserId,
+        session?.startedAt || null,
+        session?.announcementChannelId || '',
+        session?.announcementMessageId || '',
+        session?.updatedAt || null,
+        session?.lastAnnouncementHash || ''
+      ]
+    );
+
+    for (const [platform, platformState] of Object.entries(session?.platforms || {})) {
+      await db.query(
+        `INSERT INTO guild_live_session_platforms (
+           guild_id,
+           discord_user_id,
+           platform,
+           state_json
+         )
+         VALUES ($1, $2, $3, $4::jsonb)`,
+        [guildId, discordUserId, platform, JSON.stringify(platformState || {})]
+      );
+    }
+  }
+
+  return nextGuildState;
+}
+
+async function readGuildStateFromDatabase(db, guildId) {
+  const state = getDefaultGuildState();
+
+  const liveConfigResult = await db.query(
+    `SELECT streamer_role_id, live_ping_role_id, live_announcements_channel_id
+     FROM guild_live_config
+     WHERE guild_id = $1`,
+    [guildId]
+  );
+
+  if (liveConfigResult.rows[0]) {
+    state.liveConfig = {
+      streamerRoleId: liveConfigResult.rows[0].streamer_role_id || '',
+      livePingRoleId: liveConfigResult.rows[0].live_ping_role_id || '',
+      liveAnnouncementsChannelId: liveConfigResult.rows[0].live_announcements_channel_id || ''
+    };
+  }
+
+  const rolePanelConfigResult = await db.query(
+    `SELECT channel_id
+     FROM guild_role_panel_config
+     WHERE guild_id = $1`,
+    [guildId]
+  );
+
+  const rolePanelRolesResult = await db.query(
+    `SELECT role_id
+     FROM guild_role_panel_roles
+     WHERE guild_id = $1
+     ORDER BY role_id`,
+    [guildId]
+  );
+
+  state.rolePanelConfig = {
+    channelId: rolePanelConfigResult.rows[0]?.channel_id || '',
+    roleIds: rolePanelRolesResult.rows.map((row) => row.role_id)
+  };
+
+  const callsignMappingsResult = await db.query(
+    `SELECT iata_designator, icao_root
+     FROM guild_callsign_mappings
+     WHERE guild_id = $1`,
+    [guildId]
+  );
+
+  state.callsignConfig = {
+    iataMappings: Object.fromEntries(
+      callsignMappingsResult.rows.map((row) => [row.iata_designator, row.icao_root])
+    )
+  };
+
+  const welcomeConfigResult = await db.query(
+    `SELECT enabled, channel_id, rules_channel_id, use_mentions
+     FROM guild_welcome_config
+     WHERE guild_id = $1`,
+    [guildId]
+  );
+
+  const welcomeMessagesResult = await db.query(
+    `SELECT message
+     FROM guild_welcome_messages
+     WHERE guild_id = $1
+     ORDER BY sort_order ASC`,
+    [guildId]
+  );
+
+  state.welcomeConfig = {
+    ...getDefaultWelcomeConfig(),
+    enabled: welcomeConfigResult.rows[0]?.enabled === true,
+    channelId: welcomeConfigResult.rows[0]?.channel_id || '',
+    rulesChannelId: welcomeConfigResult.rows[0]?.rules_channel_id || '',
+    useMentions: welcomeConfigResult.rows[0]?.use_mentions === undefined
+      ? true
+      : welcomeConfigResult.rows[0].use_mentions === true,
+    messages: welcomeMessagesResult.rows.map((row) => row.message)
+  };
+
+  const scheduleConfigResult = await db.query(
+    `SELECT channel_id, mode, creator_role_id, title_format
+     FROM guild_schedule_config
+     WHERE guild_id = $1`,
+    [guildId]
+  );
+
+  state.scheduleConfig = {
+    ...getDefaultScheduleConfig(),
+    channelId: scheduleConfigResult.rows[0]?.channel_id || '',
+    mode: scheduleConfigResult.rows[0]?.mode || 'forum_post',
+    creatorRoleId: scheduleConfigResult.rows[0]?.creator_role_id || '',
+    titleFormat: scheduleConfigResult.rows[0]?.title_format || 'Schedule | {displayName}'
+  };
+
+  const schedulesResult = await db.query(
+    `SELECT owner_user_id, display_name, thread_id, root_message_id, updated_at
+     FROM guild_schedules
+     WHERE guild_id = $1`,
+    [guildId]
+  );
+
+  const scheduleEntriesResult = await db.query(
+    `SELECT owner_user_id, day_of_week, entry_text
+     FROM guild_schedule_entries
+     WHERE guild_id = $1`,
+    [guildId]
+  );
+
+  const schedules = {};
+  for (const row of schedulesResult.rows) {
+    schedules[row.owner_user_id] = {
+      ownerUserId: row.owner_user_id,
+      displayName: row.display_name || '',
+      threadId: row.thread_id || '',
+      rootMessageId: row.root_message_id || '',
+      entries: getDefaultScheduleEntries(),
+      updatedAt: row.updated_at ? row.updated_at.toISOString() : null
+    };
+  }
+
+  for (const row of scheduleEntriesResult.rows) {
+    if (!schedules[row.owner_user_id]) {
+      schedules[row.owner_user_id] = {
+        ownerUserId: row.owner_user_id,
+        displayName: '',
+        threadId: '',
+        rootMessageId: '',
+        entries: getDefaultScheduleEntries(),
+        updatedAt: null
+      };
+    }
+
+    if (DAY_ORDER.includes(row.day_of_week)) {
+      schedules[row.owner_user_id].entries[row.day_of_week] = row.entry_text || '';
+    }
+  }
+
+  state.schedules = schedules;
+
+  const streamersResult = await db.query(
+    `SELECT discord_user_id, display_name, added_at, updated_at
+     FROM guild_streamers
+     WHERE guild_id = $1`,
+    [guildId]
+  );
+
+  const streamerChannelsResult = await db.query(
+    `SELECT discord_user_id, platform, url, identifier
+     FROM guild_streamer_channels
+     WHERE guild_id = $1`,
+    [guildId]
+  );
+
+  const streamers = {};
+  for (const row of streamersResult.rows) {
+    streamers[row.discord_user_id] = {
+      discordUserId: row.discord_user_id,
+      displayName: row.display_name || '',
+      channels: {
+        twitch: null,
+        tiktok: null,
+        youtube: null
+      },
+      addedAt: row.added_at ? row.added_at.toISOString() : null,
+      updatedAt: row.updated_at ? row.updated_at.toISOString() : null
+    };
+  }
+
+  for (const row of streamerChannelsResult.rows) {
+    if (!streamers[row.discord_user_id]) {
+      streamers[row.discord_user_id] = {
+        discordUserId: row.discord_user_id,
+        displayName: '',
+        channels: {
+          twitch: null,
+          tiktok: null,
+          youtube: null
+        },
+        addedAt: null,
+        updatedAt: null
+      };
+    }
+
+    streamers[row.discord_user_id].channels[row.platform] = {
+      platform: row.platform,
+      url: row.url,
+      identifier: row.identifier || ''
+    };
+  }
+
+  state.streamers = streamers;
+
+  const liveSessionsResult = await db.query(
+    `SELECT
+       discord_user_id,
+       started_at,
+       announcement_channel_id,
+       announcement_message_id,
+       updated_at,
+       last_announcement_hash
+     FROM guild_live_sessions
+     WHERE guild_id = $1`,
+    [guildId]
+  );
+
+  const liveSessionPlatformsResult = await db.query(
+    `SELECT discord_user_id, platform, state_json
+     FROM guild_live_session_platforms
+     WHERE guild_id = $1`,
+    [guildId]
+  );
+
+  const liveSessions = {};
+  for (const row of liveSessionsResult.rows) {
+    liveSessions[row.discord_user_id] = {
+      startedAt: row.started_at ? row.started_at.toISOString() : null,
+      announcementChannelId: row.announcement_channel_id || '',
+      announcementMessageId: row.announcement_message_id || '',
+      updatedAt: row.updated_at ? row.updated_at.toISOString() : null,
+      lastAnnouncementHash: row.last_announcement_hash || '',
+      platforms: {}
+    };
+  }
+
+  for (const row of liveSessionPlatformsResult.rows) {
+    if (!liveSessions[row.discord_user_id]) {
+      liveSessions[row.discord_user_id] = {
+        startedAt: null,
+        announcementChannelId: '',
+        announcementMessageId: '',
+        updatedAt: null,
+        lastAnnouncementHash: '',
+        platforms: {}
+      };
+    }
+
+    liveSessions[row.discord_user_id].platforms[row.platform] = row.state_json || {};
+  }
+
+  state.liveSessions = liveSessions;
+
+  return normaliseGuildState(state);
+}
+
+async function migrateLegacyDatabaseStore(db) {
+  const normalisedGuildCount = await countNormalisedGuilds(db);
+  if (normalisedGuildCount > 0) {
+    return;
+  }
+
+  const legacyState = await readLegacyAppState(db);
+  if (!legacyState.guilds || Object.keys(legacyState.guilds).length === 0) {
+    return;
+  }
+
+  await db.query('BEGIN');
+
+  try {
+    for (const [guildId, guildState] of Object.entries(legacyState.guilds)) {
+      await writeGuildStateToDatabase(db, guildId, guildState);
+    }
+
+    await db.query('COMMIT');
   } catch (error) {
-    await pool.query('ROLLBACK');
+    await db.query('ROLLBACK');
     throw error;
   }
+}
+
+async function initialiseDatabaseStore() {
+  const pool = getDatabasePool();
+  if (!pool) {
+    return;
+  }
+
+  await createNormalisedTables(pool);
+  await migrateLegacyDatabaseStore(pool);
 }
 
 async function ensureStoreInitialised() {
@@ -417,15 +1083,16 @@ async function readStore() {
   if (shouldUseDatabase()) {
     try {
       const pool = getDatabasePool();
-      const result = await pool.query(
-        'SELECT guild_id, state_json FROM app_state'
-      );
+      const guildIds = await listGuildIds();
+
+      const guilds = {};
+      for (const guildId of guildIds) {
+        guilds[guildId] = await readGuildStateFromDatabase(pool, guildId);
+      }
 
       return {
         version: STORE_VERSION,
-        guilds: Object.fromEntries(
-          result.rows.map((row) => [row.guild_id, normaliseGuildState(row.state_json)])
-        )
+        guilds
       };
     } catch (error) {
       console.error('Failed to read database store, falling back to defaults:', error);
@@ -450,7 +1117,7 @@ async function listGuildIds() {
   if (shouldUseDatabase()) {
     try {
       const pool = getDatabasePool();
-      const result = await pool.query('SELECT guild_id FROM app_state ORDER BY guild_id');
+      const result = await pool.query('SELECT guild_id FROM guilds ORDER BY guild_id');
       return result.rows.map((row) => row.guild_id);
     } catch (error) {
       console.error('Failed to list guild IDs from database store:', error);
@@ -472,17 +1139,7 @@ async function readGuildState(guildId) {
 
   if (shouldUseDatabase()) {
     try {
-      const pool = getDatabasePool();
-      const result = await pool.query(
-        'SELECT state_json FROM app_state WHERE guild_id = $1',
-        [normalisedGuildId]
-      );
-
-      if (result.rows.length === 0) {
-        return getDefaultGuildState();
-      }
-
-      return normaliseGuildState(result.rows[0].state_json);
+      return await readGuildStateFromDatabase(getDatabasePool(), normalisedGuildId);
     } catch (error) {
       console.error(`Failed to read guild state for ${normalisedGuildId}, falling back to defaults:`, error);
       return getDefaultGuildState();
@@ -499,35 +1156,32 @@ async function writeStore(state) {
 
   if (shouldUseDatabase()) {
     const pool = getDatabasePool();
-
-    await pool.query('BEGIN');
+    const client = await pool.connect();
 
     try {
-      const existingRows = await pool.query('SELECT guild_id FROM app_state');
+      await client.query('BEGIN');
+
+      const existingGuildIdsResult = await client.query('SELECT guild_id FROM guilds');
+      const existingGuildIds = new Set(existingGuildIdsResult.rows.map((row) => row.guild_id));
       const nextGuildIds = new Set(Object.keys(nextState.guilds));
-      const existingGuildIds = existingRows.rows.map((row) => row.guild_id);
 
       for (const guildId of existingGuildIds) {
         if (!nextGuildIds.has(guildId)) {
-          await pool.query('DELETE FROM app_state WHERE guild_id = $1', [guildId]);
+          await client.query('DELETE FROM guilds WHERE guild_id = $1', [guildId]);
         }
       }
 
       for (const [guildId, guildState] of Object.entries(nextState.guilds)) {
-        await pool.query(
-          `INSERT INTO app_state (guild_id, state_json, updated_at)
-           VALUES ($1, $2::jsonb, NOW())
-           ON CONFLICT (guild_id)
-           DO UPDATE SET state_json = EXCLUDED.state_json, updated_at = NOW()`,
-          [guildId, JSON.stringify(normaliseGuildState(guildState))]
-        );
+        await writeGuildStateToDatabase(client, guildId, guildState);
       }
 
-      await pool.query('COMMIT');
+      await client.query('COMMIT');
       return nextState;
     } catch (error) {
-      await pool.query('ROLLBACK');
+      await client.query('ROLLBACK');
       throw error;
+    } finally {
+      client.release();
     }
   }
 
@@ -550,15 +1204,7 @@ async function writeGuildState(guildId, guildState) {
   const nextGuildState = normaliseGuildState(guildState);
 
   if (shouldUseDatabase()) {
-    const pool = getDatabasePool();
-    await pool.query(
-      `INSERT INTO app_state (guild_id, state_json, updated_at)
-       VALUES ($1, $2::jsonb, NOW())
-       ON CONFLICT (guild_id)
-       DO UPDATE SET state_json = EXCLUDED.state_json, updated_at = NOW()`,
-      [normalisedGuildId, JSON.stringify(nextGuildState)]
-    );
-
+    await writeGuildStateToDatabase(getDatabasePool(), normalisedGuildId, nextGuildState);
     return nextGuildState;
   }
 
@@ -591,31 +1237,24 @@ async function updateGuildState(guildId, updater) {
       await client.query('BEGIN');
 
       await client.query(
-        `INSERT INTO app_state (guild_id, state_json, updated_at)
-         VALUES ($1, $2::jsonb, NOW())
-         ON CONFLICT (guild_id) DO NOTHING`,
-        [normalisedGuildId, JSON.stringify(getDefaultGuildState())]
-      );
-
-      const result = await client.query(
-        'SELECT state_json FROM app_state WHERE guild_id = $1 FOR UPDATE',
+        `INSERT INTO guilds (guild_id, updated_at)
+         VALUES ($1, NOW())
+         ON CONFLICT (guild_id)
+         DO UPDATE SET updated_at = NOW()`,
         [normalisedGuildId]
       );
 
-      const guildState = normaliseGuildState(result.rows[0]?.state_json || getDefaultGuildState());
-      const updaterResult = await updater(guildState);
-      const nextGuildState = normaliseGuildState(guildState);
-
       await client.query(
-        `UPDATE app_state
-         SET state_json = $2::jsonb,
-             updated_at = NOW()
-         WHERE guild_id = $1`,
-        [normalisedGuildId, JSON.stringify(nextGuildState)]
+        'SELECT guild_id FROM guilds WHERE guild_id = $1 FOR UPDATE',
+        [normalisedGuildId]
       );
 
+      const guildState = await readGuildStateFromDatabase(client, normalisedGuildId);
+      const result = await updater(guildState);
+      await writeGuildStateToDatabase(client, normalisedGuildId, guildState);
+
       await client.query('COMMIT');
-      return updaterResult;
+      return result;
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -638,12 +1277,12 @@ async function getStoreStatus() {
 
     if (shouldUseDatabase()) {
       const pool = getDatabasePool();
-      const result = await pool.query('SELECT COUNT(*)::int AS guild_count FROM app_state');
+      const guildCount = await countNormalisedGuilds(pool);
 
       return {
         mode,
         healthy: true,
-        guildCount: Number(result.rows[0]?.guild_count || 0),
+        guildCount,
         filePath: '',
         error: ''
       };
