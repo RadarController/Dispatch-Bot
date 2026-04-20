@@ -12,6 +12,7 @@ if (missing.length > 0) {
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.GuildModeration
   ]
@@ -29,6 +30,7 @@ for (const file of fs.readdirSync(commandsPath).filter((name) => name.endsWith('
 
 const readyHandler = require('./events/ready');
 const interactionCreateHandler = require('./events/interactionCreate');
+const guildMemberAddHandler = require('./events/guildMemberAdd');
 
 client.once('clientReady', () => {
   readyHandler(client).catch((error) => {
@@ -39,6 +41,12 @@ client.once('clientReady', () => {
 client.on('interactionCreate', (interaction) => {
   interactionCreateHandler(interaction, client).catch((error) => {
     console.error('Interaction handler failed:', error);
+  });
+});
+
+client.on('guildMemberAdd', (member) => {
+  guildMemberAddHandler(member).catch((error) => {
+    console.error('Guild member add handler failed:', error);
   });
 });
 
