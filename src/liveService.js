@@ -93,8 +93,25 @@ async function getAnnouncementChannel(client, channelId) {
   return channel;
 }
 
-async function processStreamer(client, guildId, state, streamer) {
-  const liveConfig = state.liveConfig || {};
+async function saveLiveSession(guildId, discordUserId, session) {
+  await store.updateGuildState(guildId, (guildState) => {
+    guildState.liveSessions = guildState.liveSessions || {};
+    guildState.liveSessions[discordUserId] = session;
+    return guildState.liveSessions[discordUserId];
+  });
+}
+
+async function clearLiveSession(guildId, discordUserId) {
+  await store.updateGuildState(guildId, (guildState) => {
+    guildState.liveSessions = guildState.liveSessions || {};
+    delete guildState.liveSessions[discordUserId];
+    return null;
+  });
+}
+
+async function processStreamer(client, guildId, streamer) {
+  const guildState = await store.readGuildState(guildId);
+  const liveConfig = guildState.liveConfig || {};
   const announcementChannel = await getAnnouncementChannel(client, liveConfig.liveAnnouncementsChannelId);
 
   if (!announcementChannel) {
@@ -115,11 +132,11 @@ async function processStreamer(client, guildId, state, streamer) {
   }
 
   const isActive = hasAnyLivePlatform(platformStates);
-  const existingSession = state.liveSessions[streamer.discordUserId] || null;
+  const existingSession = guildState.liveSessions?.[streamer.discordUserId] || null;
 
   if (!isActive) {
     if (existingSession) {
-      delete state.liveSessions[streamer.discordUserId];
+      await clearLiveSession(guildId, streamer.discordUserId);
     }
     return;
   }
@@ -159,7 +176,7 @@ async function processStreamer(client, guildId, state, streamer) {
   }
 
   nextSession.lastAnnouncementHash = nextHash;
-  state.liveSessions[streamer.discordUserId] = nextSession;
+  await saveLiveSession(guildId, streamer.discordUserId, nextSession);
 }
 
 async function runLiveMonitorTick(client) {
@@ -190,10 +207,8 @@ async function runLiveMonitorTick(client) {
       }
 
       for (const streamer of streamers) {
-        await processStreamer(client, guildId, state, streamer);
+        await processStreamer(client, guildId, streamer);
       }
-
-      await store.writeGuildState(guildId, state);
     }
   } catch (error) {
     liveMonitorStatus.lastTickError = error.message || String(error);
