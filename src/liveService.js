@@ -1,6 +1,11 @@
-const { ChannelType } = require('discord.js');
+const { ChannelType, EmbedBuilder } = require('discord.js');
 const { config } = require('./config');
 const { checkLiveChannel, PLATFORM_LABELS, PLATFORMS } = require('./liveProviders');
+const PLATFORM_ICONS = {
+  twitch: '🟣',
+  youtube: '🔴',
+  tiktok: '⚫'
+};
 const store = require('./store');
 
 let liveMonitorHandle = null;
@@ -72,38 +77,76 @@ function buildAnnouncementHash(streamer, platformStates) {
   return JSON.stringify(buildStablePlatformSummary(streamer, platformStates));
 }
 
+function getEmbedColor(session) {
+  const activePlatforms = PLATFORMS.filter((platform) => session.platforms?.[platform]?.isLive);
+
+  if (activePlatforms.length === 1) {
+    switch (activePlatforms[0]) {
+      case 'twitch':
+        return 0x9146FF;
+      case 'youtube':
+        return 0xFF0000;
+      case 'tiktok':
+        return 0x000000;
+      default:
+        return 0x5865F2;
+    }
+  }
+
+  return 0x5865F2;
+}
+
 function buildAnnouncementPayload(streamer, liveConfig, session, includePing) {
   const displayName = streamer.displayName || `Streamer ${streamer.discordUserId}`;
-  const lines = [];
 
-  if (includePing && liveConfig.livePingRoleId) {
-    lines.push(`<@&${liveConfig.livePingRoleId}>`);
-    lines.push('');
+  const livePlatforms = PLATFORMS
+    .map((platform) => ({
+      platform,
+      state: session.platforms?.[platform]
+    }))
+    .filter(({ state }) => state?.isLive);
+
+  const primaryLiveUrl = livePlatforms[0]?.state?.liveUrl || null;
+
+  const platformLines = livePlatforms.length > 0
+    ? livePlatforms.map(({ platform, state }) => {
+        const label = PLATFORM_LABELS[platform];
+        const url = state.liveUrl || 'Unknown URL';
+        const titleLine = state.title ? `\n> ${state.title}` : '';
+        return `• **${label}** — [Watch stream](${url})${titleLine}`;
+      }).join('\n\n')
+    : 'No active platforms detected.';
+
+  const embed = new EmbedBuilder()
+    .setColor(getEmbedColor(session))
+    .setAuthor({
+      name: 'StreamingATC.Live'
+    })
+    .setTitle(`🔴 ${displayName} is now live`)
+    .setDescription(
+      [
+        `**Registered streamer:** <@${streamer.discordUserId}>`,
+        `**Started:** <t:${Math.floor(new Date(session.startedAt).getTime() / 1000)}:R>`
+      ].join('\n')
+    )
+    .addFields({
+      name: 'Platforms live',
+      value: platformLines
+    })
+    .setFooter({
+      text: 'StreamingATC.Live Dispatch Bot'
+    })
+    .setTimestamp(new Date());
+
+  if (primaryLiveUrl) {
+    embed.setURL(primaryLiveUrl);
   }
-
-  lines.push(`**${displayName} is now live**`);
-  lines.push(`Registered streamer: <@${streamer.discordUserId}>`);
-  lines.push(`Started: <t:${Math.floor(new Date(session.startedAt).getTime() / 1000)}:R>`);
-  lines.push('');
-  lines.push('**Platforms currently live**');
-
-  for (const platform of PLATFORMS) {
-    const state = session.platforms?.[platform];
-    if (!state?.isLive) {
-      continue;
-    }
-
-    lines.push(`- ${PLATFORM_LABELS[platform]}: ${state.liveUrl}`);
-    if (state.title) {
-      lines.push(`  Title: ${state.title}`);
-    }
-  }
-
-  lines.push('');
-  lines.push(`Last checked: <t:${Math.floor(Date.now() / 1000)}:R>`);
 
   return {
-    content: lines.join('\n'),
+    content: includePing && liveConfig.livePingRoleId
+      ? `<@&${liveConfig.livePingRoleId}>`
+      : null,
+    embeds: [embed],
     allowedMentions: includePing && liveConfig.livePingRoleId
       ? { roles: [liveConfig.livePingRoleId] }
       : { parse: [] }
