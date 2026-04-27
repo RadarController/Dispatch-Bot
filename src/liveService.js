@@ -12,6 +12,7 @@ let liveMonitorHandle = null;
 let tickInProgress = false;
 
 const OFFLINE_CONFIRMATION_POLLS = 3;
+const ANNOUNCEMENT_RENDER_VERSION = 2;
 
 const liveMonitorStatus = {
   running: false,
@@ -242,7 +243,13 @@ async function processStreamer(client, guildId, streamer) {
 
   const nextHash = buildAnnouncementHash(streamer, platformStates);
   const shouldCreateMessage = !nextSession.announcementMessageId;
-  const shouldUpdateMessage = !shouldCreateMessage && nextHash !== existingSession?.lastAnnouncementHash;
+  const shouldRefreshForRenderVersion =
+    existingSession?.announcementRenderVersion !== ANNOUNCEMENT_RENDER_VERSION;
+
+  const shouldUpdateMessage = !shouldCreateMessage && (
+    nextHash !== existingSession?.lastAnnouncementHash ||
+    shouldRefreshForRenderVersion
+  );
 
   if (shouldCreateMessage) {
     const payload = buildAnnouncementPayload(streamer, liveConfig, nextSession, true);
@@ -263,6 +270,7 @@ async function processStreamer(client, guildId, streamer) {
   }
 
   nextSession.lastAnnouncementHash = nextHash;
+  nextSession.announcementRenderVersion = ANNOUNCEMENT_RENDER_VERSION;
   await saveLiveSession(guildId, streamer.discordUserId, nextSession);
 }
 
