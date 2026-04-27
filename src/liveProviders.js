@@ -19,9 +19,31 @@ function decodeHtmlEntities(value) {
   return value
     .replace(/&amp;/g, '&')
     .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
+    .replace(/&#39;/g, '\'')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>');
+}
+
+function decodeJsonEscapedString(value) {
+  return `${value || ''}`
+    .replace(/\\u0026/gi, '&')
+    .replace(/\\u003d/gi, '=')
+    .replace(/\\u002f/gi, '/')
+    .replace(/\\u003f/gi, '?')
+    .replace(/\\u003a/gi, ':')
+    .replace(/\\u0025/gi, '%')
+    .replace(/\\u002c/gi, ',')
+    .replace(/\\u002b/gi, '+')
+    .replace(/\\u0027/gi, '\'')
+    .replace(/\\u003c/gi, '<')
+    .replace(/\\u003e/gi, '>')
+    .replace(/\\n/g, ' ')
+    .replace(/\\r/g, ' ')
+    .replace(/\\t/g, ' ')
+    .replace(/\\"/g, '"')
+    .replace(/\\\//g, '/')
+    .replace(/\\\\/g, '\\')
+    .trim();
 }
 
 function extractMetaContent(html, attributeName, attributeValue) {
@@ -33,11 +55,32 @@ function extractMetaContent(html, attributeName, attributeValue) {
   return match ? decodeHtmlEntities(match[1].trim()) : '';
 }
 
+function extractLinkHref(html, relValue) {
+  const escapedValue = escapeRegExp(relValue);
+  const primary = new RegExp(`<link[^>]+rel=["']${escapedValue}["'][^>]+href=["']([^"']*)["'][^>]*>`, 'i');
+  const secondary = new RegExp(`<link[^>]+href=["']([^"']*)["'][^>]+rel=["']${escapedValue}["'][^>]*>`, 'i');
+  const match = html.match(primary) || html.match(secondary);
+
+  return match ? decodeHtmlEntities(match[1].trim()) : '';
+}
+
+function extractFirstMatch(html, patterns) {
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+    if (match?.[1]) {
+      return decodeJsonEscapedString(match[1]);
+    }
+  }
+
+  return '';
+}
+
 function cleanTitle(title) {
-  return title
+  return `${title || ''}`
     .replace(/\s*-\s*Twitch\s*$/i, '')
     .replace(/\s*-\s*YouTube\s*$/i, '')
     .replace(/\s*[|·]\s*TikTok.*$/i, '')
+    .replace(/\s+/g, ' ')
     .trim();
 }
 
@@ -66,6 +109,7 @@ function buildOfflineResult(platform, channel, extra = {}) {
     checkedAt: new Date().toISOString(),
     liveUrl: channel?.url || '',
     title: '',
+    profileImageUrl: '',
     ...extra
   };
 }
@@ -195,16 +239,38 @@ async function checkTwitchChannel(channel) {
       return buildOfflineResult('twitch', channel, { error: `HTTP ${page.status}` });
     }
 
-    const isLive = /"isLiveBroadcast"\s*:\s*true/i.test(page.html) ||
+    const isLive =
+      /"isLiveBroadcast"\s*:\s*true/i.test(page.html) ||
       /"isLive"\s*:\s*true/i.test(page.html) ||
       /"isLiveNow"\s*:\s*true/i.test(page.html);
+
+    const title = cleanTitle(
+      extractFirstMatch(page.html, [
+        /"lastBroadcast"\s*:\s*{[\s\S]*?"title"\s*:\s*"((?:\\.|[^"])*)"/i,
+        /"broadcastSettings"\s*:\s*{[\s\S]*?"title"\s*:\s*"((?:\\.|[^"])*)"/i,
+        /"stream"\s*:\s*{[\s\S]*?"title"\s*:\s*"((?:\\.|[^"])*)"/i
+      ]) ||
+      extractMetaContent(page.html, 'property', 'og:description') ||
+      extractMetaContent(page.html, 'name', 'twitter:description') ||
+      extractMetaContent(page.html, 'name', 'description')
+    );
+
+    const profileImageUrl =
+      extractFirstMatch(page.html, [
+        /"profileImageURL"\s*:\s*"((?:\\.|[^"])*)"/i,
+        /"profileImageUrl"\s*:\s*"((?:\\.|[^"])*)"/i,
+        /"profile_image_url"\s*:\s*"((?:\\.|[^"])*)"/i
+      ]) ||
+      extractMetaContent(page.html, 'property', 'og:image') ||
+      extractMetaContent(page.html, 'name', 'twitter:image');
 
     return {
       platform: 'twitch',
       isLive,
       checkedAt: new Date().toISOString(),
       liveUrl: channel.url,
-      title: cleanTitle(extractMetaContent(page.html, 'property', 'og:title') || extractMetaContent(page.html, 'name', 'twitter:title')),
+      title,
+      profileImageUrl,
       pageUrl: page.finalUrl
     };
   } catch (error) {
@@ -221,17 +287,32 @@ async function checkYouTubeChannel(channel) {
       return buildOfflineResult('youtube', channel, { error: `HTTP ${page.status}` });
     }
 
-    const isLive = page.finalUrl.includes('/watch?') ||
+    const isLive =
+      page.finalUrl.includes('/watch?') ||
       /"isLiveContent"\s*:\s*true/i.test(page.html) ||
       /"isLive"\s*:\s*true/i.test(page.html) ||
       /"isLiveNow"\s*:\s*true/i.test(page.html);
+
+    const title = cleanTitle(
+      extractMetaContent(page.html, 'property', 'og:title') ||
+      extractMetaContent(page.html, 'name', 'title')
+    );
+
+    const profileImageUrl =
+      extractFirstMatch(page.html, [
+        /"avatar"\s*:\s*{[\s\S]*?"thumbnails"\s*:\s*\[[\s\S]*?"url"\s*:\s*"((?:\\.|[^"])*)"/i,
+        /"channelMetadataRenderer"\s*:\s*{[\s\S]*?"avatar"\s*:\s*{[\s\S]*?"thumbnails"\s*:\s*\[[\s\S]*?"url"\s*:\s*"((?:\\.|[^"])*)"/i,
+        /"ownerProfileUrl":"(?:\\.|[^"]*)","avatarThumbnails":\[\{"url":"((?:\\.|[^"])*)"/i
+      ]) ||
+      extractLinkHref(page.html, 'image_src');
 
     return {
       platform: 'youtube',
       isLive,
       checkedAt: new Date().toISOString(),
       liveUrl: isLive ? page.finalUrl : monitorUrl,
-      title: cleanTitle(extractMetaContent(page.html, 'property', 'og:title') || extractMetaContent(page.html, 'name', 'title')),
+      title,
+      profileImageUrl,
       pageUrl: page.finalUrl
     };
   } catch (error) {
@@ -248,16 +329,32 @@ async function checkTikTokChannel(channel) {
       return buildOfflineResult('tiktok', channel, { error: `HTTP ${page.status}` });
     }
 
-    const isLive = (/"liveRoom/i.test(page.html) && /"statusCode"\s*:\s*0/i.test(page.html)) ||
+    const isLive =
+      (/"liveRoom/i.test(page.html) && /"statusCode"\s*:\s*0/i.test(page.html)) ||
       /"isLive"\s*:\s*true/i.test(page.html) ||
       /"liveRoomId"\s*:/i.test(page.html);
+
+    const title = cleanTitle(
+      extractMetaContent(page.html, 'property', 'og:title') ||
+      extractMetaContent(page.html, 'name', 'twitter:title')
+    );
+
+    const profileImageUrl =
+      extractFirstMatch(page.html, [
+        /"avatarLarger"\s*:\s*"((?:\\.|[^"])*)"/i,
+        /"avatarMedium"\s*:\s*"((?:\\.|[^"])*)"/i,
+        /"avatarThumb"\s*:\s*"((?:\\.|[^"])*)"/i
+      ]) ||
+      extractMetaContent(page.html, 'property', 'og:image') ||
+      extractMetaContent(page.html, 'name', 'twitter:image');
 
     return {
       platform: 'tiktok',
       isLive,
       checkedAt: new Date().toISOString(),
       liveUrl: isLive ? page.finalUrl : monitorUrl,
-      title: cleanTitle(extractMetaContent(page.html, 'property', 'og:title') || extractMetaContent(page.html, 'name', 'twitter:title')),
+      title,
+      profileImageUrl,
       pageUrl: page.finalUrl
     };
   } catch (error) {

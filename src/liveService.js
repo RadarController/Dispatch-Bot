@@ -12,7 +12,8 @@ let liveMonitorHandle = null;
 let tickInProgress = false;
 
 const OFFLINE_CONFIRMATION_POLLS = 3;
-const ANNOUNCEMENT_RENDER_VERSION = 2;
+const ANNOUNCEMENT_RENDER_VERSION = 3;
+const PROFILE_IMAGE_PLATFORM_PREFERENCE = ['twitch', 'youtube', 'tiktok'];
 
 const liveMonitorStatus = {
   running: false,
@@ -97,10 +98,28 @@ function getEmbedColor(session) {
   return 0x5865F2;
 }
 
+function getOrderedPlatforms() {
+  return [
+    ...PROFILE_IMAGE_PLATFORM_PREFERENCE,
+    ...PLATFORMS.filter((platform) => !PROFILE_IMAGE_PLATFORM_PREFERENCE.includes(platform))
+  ];
+}
+
+function getPreferredLiveProfileImageUrl(session) {
+  for (const platform of getOrderedPlatforms()) {
+    const state = session.platforms?.[platform];
+    if (state?.isLive && state?.profileImageUrl) {
+      return state.profileImageUrl;
+    }
+  }
+
+  return '';
+}
+
 function buildAnnouncementPayload(streamer, liveConfig, session, includePing) {
   const displayName = streamer.displayName || `Streamer ${streamer.discordUserId}`;
 
-  const livePlatforms = PLATFORMS
+  const livePlatforms = getOrderedPlatforms()
     .map((platform) => ({
       platform,
       state: session.platforms?.[platform]
@@ -108,21 +127,29 @@ function buildAnnouncementPayload(streamer, liveConfig, session, includePing) {
     .filter(({ state }) => state?.isLive);
 
   const primaryLiveUrl = livePlatforms[0]?.state?.liveUrl || null;
+  const preferredProfileImageUrl = getPreferredLiveProfileImageUrl(session);
 
   const platformLines = livePlatforms.length > 0
     ? livePlatforms.map(({ platform, state }) => {
+        const icon = PLATFORM_ICONS[platform] || '•';
         const label = PLATFORM_LABELS[platform];
         const url = state.liveUrl || 'Unknown URL';
         const titleLine = state.title ? `\n> ${state.title}` : '';
-        return `• **${label}** — [Watch stream](${url})${titleLine}`;
+        return `${icon} **${label}** — [Watch stream](${url})${titleLine}`;
       }).join('\n\n')
     : 'No active platforms detected.';
 
+  const authorConfig = {
+    name: 'StreamingATC.Live'
+  };
+
+  if (preferredProfileImageUrl) {
+    authorConfig.iconURL = preferredProfileImageUrl;
+  }
+
   const embed = new EmbedBuilder()
     .setColor(getEmbedColor(session))
-    .setAuthor({
-      name: 'StreamingATC.Live'
-    })
+    .setAuthor(authorConfig)
     .setTitle(`🔴 ${displayName} is now live`)
     .setDescription(
       [
