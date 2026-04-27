@@ -12,7 +12,7 @@ let liveMonitorHandle = null;
 let tickInProgress = false;
 
 const OFFLINE_CONFIRMATION_POLLS = 3;
-const ANNOUNCEMENT_RENDER_VERSION = 3;
+const ANNOUNCEMENT_RENDER_VERSION = 4;
 const PROFILE_IMAGE_PLATFORM_PREFERENCE = ['twitch', 'youtube', 'tiktok'];
 
 const liveMonitorStatus = {
@@ -128,6 +128,7 @@ function buildAnnouncementPayload(streamer, liveConfig, session, includePing) {
 
   const primaryLiveUrl = livePlatforms[0]?.state?.liveUrl || null;
   const preferredProfileImageUrl = getPreferredLiveProfileImageUrl(session);
+  const startedUnix = Math.floor(new Date(session.startedAt).getTime() / 1000);
 
   const platformLines = livePlatforms.length > 0
     ? livePlatforms.map(({ platform, state }) => {
@@ -150,12 +151,9 @@ function buildAnnouncementPayload(streamer, liveConfig, session, includePing) {
   const embed = new EmbedBuilder()
     .setColor(getEmbedColor(session))
     .setAuthor(authorConfig)
-    .setTitle(`🔴 ${displayName} is now live`)
+    .setTitle(`🔴 ${displayName} went live`)
     .setDescription(
-      [
-        `**Registered streamer:** <@${streamer.discordUserId}>`,
-        `**Started:** <t:${Math.floor(new Date(session.startedAt).getTime() / 1000)}:R>`
-      ].join('\n')
+      `<@${streamer.discordUserId}> went live <t:${startedUnix}:R>`
     )
     .addFields({
       name: 'Platforms live',
@@ -171,7 +169,7 @@ function buildAnnouncementPayload(streamer, liveConfig, session, includePing) {
   }
 
   return {
-    content: includePing && liveConfig.livePingRoleId
+    content: liveConfig.livePingRoleId
       ? `<@&${liveConfig.livePingRoleId}>`
       : null,
     embeds: [embed],
