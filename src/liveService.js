@@ -6,6 +6,8 @@ const store = require('./store');
 let liveMonitorHandle = null;
 let tickInProgress = false;
 
+const OFFLINE_CONFIRMATION_POLLS = 3;
+
 const liveMonitorStatus = {
   running: false,
   tickInProgress: false,
@@ -29,17 +31,45 @@ function hasAnyLivePlatform(platformStates) {
   return Object.values(platformStates).some((state) => state?.isLive);
 }
 
-function buildAnnouncementHash(platformStates) {
-  const summary = Object.fromEntries(
+function canonicaliseLiveUrl(url) {
+  const raw = `${url || ''}`.trim();
+  if (!raw) {
+    return '';
+  }
+
+  try {
+    const parsed = new URL(raw);
+    parsed.search = '';
+    parsed.hash = '';
+
+    let pathname = parsed.pathname || '/';
+    pathname = pathname.replace(/\/+$/, '');
+    parsed.pathname = pathname || '/';
+
+    return parsed.toString().replace(/\/$/, '');
+  } catch {
+    return raw.replace(/[?#].*$/, '').replace(/\/+$/, '');
+  }
+}
+
+function buildStablePlatformSummary(streamer, platformStates) {
+  return Object.fromEntries(
     Object.entries(platformStates)
       .filter(([, state]) => state?.isLive)
-      .map(([platform, state]) => [platform, {
-        liveUrl: state.liveUrl || '',
-        title: state.title || ''
-      }])
-  );
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([platform, state]) => {
+        const configuredUrl = streamer.channels?.[platform]?.url || '';
+        const stableUrl = canonicaliseLiveUrl(state.liveUrl || configuredUrl);
 
-  return JSON.stringify(summary);
+        return [platform, {
+          liveUrl: stableUrl
+        }];
+      })
+  );
+}
+
+function buildAnnouncementHash(streamer, platformStates) {
+  return JSON.stringify(buildStablePlatformSummary(streamer, platformStates));
 }
 
 function buildAnnouncementPayload(streamer, liveConfig, session, includePing) {
@@ -135,9 +165,22 @@ async function processStreamer(client, guildId, streamer) {
   const existingSession = guildState.liveSessions?.[streamer.discordUserId] || null;
 
   if (!isActive) {
-    if (existingSession) {
-      await clearLiveSession(guildId, streamer.discordUserId);
+    if (!existingSession) {
+      return;
     }
+
+    const nextOfflineMissCount = Number(existingSession.offlineMissCount || 0) + 1;
+
+    if (nextOfflineMissCount < OFFLINE_CONFIRMATION_POLLS) {
+      await saveLiveSession(guildId, streamer.discordUserId, {
+        ...existingSession,
+        updatedAt: new Date().toISOString(),
+        offlineMissCount: nextOfflineMissCount
+      });
+      return;
+    }
+
+    await clearLiveSession(guildId, streamer.discordUserId);
     return;
   }
 
@@ -152,10 +195,11 @@ async function processStreamer(client, guildId, streamer) {
 
   nextSession.platforms = platformStates;
   nextSession.updatedAt = nowIso;
+  nextSession.offlineMissCount = 0;
 
-  const nextHash = buildAnnouncementHash(platformStates);
+  const nextHash = buildAnnouncementHash(streamer, platformStates);
   const shouldCreateMessage = !nextSession.announcementMessageId;
-  const shouldUpdateMessage = shouldCreateMessage || nextHash !== existingSession?.lastAnnouncementHash;
+  const shouldUpdateMessage = !shouldCreateMessage && nextHash !== existingSession?.lastAnnouncementHash;
 
   if (shouldCreateMessage) {
     const payload = buildAnnouncementPayload(streamer, liveConfig, nextSession, true);
@@ -169,9 +213,9 @@ async function processStreamer(client, guildId, streamer) {
     if (message) {
       await message.edit(payload);
     } else {
-      const replacement = await announcementChannel.send(payload);
-      nextSession.announcementMessageId = replacement.id;
-      nextSession.announcementChannelId = replacement.channelId;
+      console.warn(
+        `Could not fetch existing announcement message ${nextSession.announcementMessageId} for streamer ${streamer.discordUserId} in guild ${guildId}; keeping current session without posting a replacement.`
+      );
     }
   }
 
